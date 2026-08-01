@@ -88,6 +88,16 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     );
     const employeeRoleId = employeeRoleResult.insertId;
 
+    const [purchaseEmployeeRoleResult] = await tenantConn.query(
+      'INSERT INTO roles (name, description) VALUES ("Purchase Employee", "Purchase and inventory staff member for GRN and stock entry")'
+    );
+    const purchaseEmployeeRoleId = purchaseEmployeeRoleResult.insertId;
+
+    const [salesEmployeeRoleResult] = await tenantConn.query(
+      'INSERT INTO roles (name, description) VALUES ("Sales Employee", "Sales and POS cashier staff member for checkout and customer logs")'
+    );
+    const salesEmployeeRoleId = salesEmployeeRoleResult.insertId;
+
     // 5. Seed Permissions List
     const permissions = [
       ['view_dashboard', 'Dashboard', 'View dashboard metrics'],
@@ -97,12 +107,24 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
       ['create_products', 'Products', 'Create new product listings'],
       ['edit_products', 'Products', 'Edit product parameters'],
       ['delete_products', 'Products', 'Permanently delete items'],
+      ['import_products', 'Products', 'Bulk import products via Excel/CSV'],
+      ['export_products', 'Products', 'Bulk export products catalog'],
+      ['view_categories', 'Categories', 'View category listings'],
+      ['create_categories', 'Categories', 'Create category master records'],
+      ['edit_categories', 'Categories', 'Edit category details'],
+      ['delete_categories', 'Categories', 'Delete unused category department groupings'],
       ['view_stock', 'Stock', 'View inventory levels'],
       ['adjust_stock', 'Stock', 'Manually adjust stock balances'],
       ['transfer_stock', 'Stock', 'Transfer stocks between warehouses'],
+      ['view_stock_history', 'Stock', 'View stock audit history logs'],
+      ['destroy_stock', 'Stock', 'Record damaged or destroyed stock'],
       ['view_purchases', 'Purchases', 'View purchase ledger lists'],
       ['create_purchases', 'Purchases', 'Record distributor invoices'],
       ['delete_purchases', 'Purchases', 'Cancel purchase orders'],
+      ['view_vendors', 'Vendors', 'View supplier master directory'],
+      ['create_vendors', 'Vendors', 'Create vendor profiles'],
+      ['edit_vendors', 'Vendors', 'Edit vendor parameters'],
+      ['manage_vendors', 'Vendors', 'Manage vendor ledgers'],
       ['view_sales', 'Sales', 'View sales history'],
       ['create_sales', 'Sales', 'Generate sales POS billing'],
       ['delete_sales', 'Sales', 'Void sales invoices'],
@@ -110,7 +132,11 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
       ['manage_users', 'Users', 'Create employee logins'],
       ['view_activity_logs', 'System', 'Audit staff logs'],
       ['view_borrow', 'Borrow', 'View outstanding customer Udhaar summary'],
-      ['create_borrow', 'Borrow', 'Record custom borrow/payback transaction log']
+      ['create_borrow', 'Borrow', 'Record custom borrow/payback transaction log'],
+      ['manage_borrow', 'Borrow', 'Settle customer credit debts'],
+      ['view_returns', 'Returns', 'View product returns logs'],
+      ['create_returns', 'Returns', 'Record vendor/customer returns'],
+      ['approve_returns', 'Returns', 'Approve return credits']
     ];
 
     const permMap = {};
@@ -142,8 +168,9 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     // Purchase Manager gets full access to Purchases, Products, Inventory (Stock), Purchase Dashboard, and Vendor management
     const purchaseManagerPerms = [
       'view_dashboard', 'view_purchases', 'create_purchases', 'delete_purchases', 
-      'view_products', 'create_products', 'edit_products', 'delete_products', 
-      'view_stock', 'adjust_stock', 'transfer_stock', 'manage_vendors', 'view_reports', 'manage_users'
+      'view_products', 'create_products', 'edit_products', 'delete_products', 'import_products', 'export_products',
+      'view_categories', 'create_categories', 'edit_categories', 'delete_categories',
+      'view_stock', 'adjust_stock', 'transfer_stock', 'destroy_stock', 'manage_vendors', 'view_reports', 'export_reports', 'manage_users'
     ];
     for (const name of purchaseManagerPerms) {
       if (permMap[name]) {
@@ -151,11 +178,27 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
       }
     }
 
-    // Employee gets checkout billing and inventory lookup access by default
-    const employeePerms = ['view_dashboard', 'view_products', 'view_stock', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow'];
+    // Employee gets checkout billing, products, and inventory access by default
+    const employeePerms = ['view_dashboard', 'view_products', 'create_products', 'edit_products', 'import_products', 'export_products', 'view_categories', 'create_categories', 'edit_categories', 'view_stock', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow'];
     for (const name of employeePerms) {
       if (permMap[name]) {
         await tenantConn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [employeeRoleId, permMap[name]]);
+      }
+    }
+
+    // Purchase Employee gets purchase, product import/export, and stock access
+    const purchaseEmployeePerms = ['view_dashboard', 'view_purchases', 'create_purchases', 'view_products', 'create_products', 'edit_products', 'import_products', 'export_products', 'view_categories', 'create_categories', 'edit_categories', 'view_stock', 'view_stock_history', 'adjust_stock', 'destroy_stock', 'view_reports', 'export_reports'];
+    for (const name of purchaseEmployeePerms) {
+      if (permMap[name]) {
+        await tenantConn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [purchaseEmployeeRoleId, permMap[name]]);
+      }
+    }
+
+    // Sales Employee gets sales billing and customer access
+    const salesEmployeePerms = ['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_products', 'view_categories', 'view_stock'];
+    for (const name of salesEmployeePerms) {
+      if (permMap[name]) {
+        await tenantConn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [salesEmployeeRoleId, permMap[name]]);
       }
     }
 

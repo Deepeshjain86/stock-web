@@ -261,15 +261,49 @@ export const checkPermission = (permissionName) => {
         return next();
       }
 
+      if (req.user.role === 'Purchase Manager') {
+        const allowedPmPerms = [
+          'view_dashboard', 'view_reports', 'export_reports', 'print_reports',
+          'view_purchases', 'create_purchases', 'delete_purchases', 
+          'view_vendors', 'create_vendors', 'edit_vendors', 'manage_vendors', 'delete_vendors',
+          'view_products', 'create_products', 'edit_products', 'delete_products', 'import_products', 'export_products',
+          'view_categories', 'create_categories', 'edit_categories', 'delete_categories', 
+          'view_stock', 'view_stock_history', 'adjust_stock', 'transfer_stock', 'destroy_stock', 
+          'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications',
+          'view_staff', 'manage_users'
+        ];
+        if (allowedPmPerms.includes(permissionName)) {
+          return next();
+        }
+      }
+
+      if (req.user.role === 'Sales Manager') {
+        const allowedSmPerms = [
+          'view_dashboard', 'view_reports', 'export_reports', 'print_reports',
+          'view_sales', 'create_sales', 'edit_sales', 'delete_sales', 'view_pos', 
+          'manage_customers', 'create_customers', 'edit_customers', 'delete_customers', 
+          'view_borrow', 'create_borrow', 'manage_borrow', 'delete_borrow',
+          'view_products', 'view_categories', 'view_stock', 'view_stock_history',
+          'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications',
+          'view_staff', 'manage_users'
+        ];
+        if (allowedSmPerms.includes(permissionName)) {
+          return next();
+        }
+      }
 
       if (req.user.role === 'Employee') {
         const allowedOpPerms = [
-          'view_dashboard', 'view_reports', 'view_sales', 'create_sales', 'view_pos', 
-          'manage_customers', 'view_borrow', 'create_borrow', 'manage_borrow', 
-          'view_purchases', 'create_purchases', 'view_vendors', 'manage_vendors', 
-          'view_products', 'create_products', 'edit_products', 'view_categories', 
-          'view_stock', 'view_stock_history', 'adjust_stock', 'destroy_stock', 
-          'view_returns', 'create_returns', 'approve_returns', 'view_notifications'
+          'view_dashboard', 'view_reports', 'export_reports', 'print_reports', 
+          'view_sales', 'create_sales', 'edit_sales', 'delete_sales', 'view_pos', 
+          'manage_customers', 'create_customers', 'edit_customers', 'delete_customers',
+          'view_borrow', 'create_borrow', 'manage_borrow', 'delete_borrow',
+          'view_purchases', 'create_purchases', 'delete_purchases', 
+          'view_vendors', 'create_vendors', 'edit_vendors', 'manage_vendors', 'delete_vendors',
+          'view_products', 'create_products', 'edit_products', 'delete_products', 'import_products', 'export_products',
+          'view_categories', 'create_categories', 'edit_categories', 'delete_categories',
+          'view_stock', 'view_stock_history', 'adjust_stock', 'transfer_stock', 'destroy_stock', 
+          'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications'
         ];
         if (allowedOpPerms.includes(permissionName)) {
           return next();
@@ -278,10 +312,13 @@ export const checkPermission = (permissionName) => {
 
       if (req.user.role === 'Purchase Employee') {
         const allowedPurchasePerms = [
-          'view_dashboard', 'view_reports', 'view_purchases', 'create_purchases', 
-          'view_vendors', 'manage_vendors', 'view_products', 'create_products', 'edit_products',
-          'view_categories', 'view_stock', 'view_stock_history', 'adjust_stock', 'destroy_stock', 
-          'view_returns', 'create_returns', 'approve_returns', 'view_notifications'
+          'view_dashboard', 'view_reports', 'export_reports', 'print_reports', 
+          'view_purchases', 'create_purchases', 'delete_purchases',
+          'view_vendors', 'create_vendors', 'edit_vendors', 'manage_vendors', 'delete_vendors',
+          'view_products', 'create_products', 'edit_products', 'delete_products', 'import_products', 'export_products',
+          'view_categories', 'create_categories', 'edit_categories', 'delete_categories',
+          'view_stock', 'view_stock_history', 'adjust_stock', 'transfer_stock', 'destroy_stock', 
+          'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications'
         ];
         if (allowedPurchasePerms.includes(permissionName)) {
           return next();
@@ -290,9 +327,12 @@ export const checkPermission = (permissionName) => {
 
       if (req.user.role === 'Sales Employee') {
         const allowedSalesPerms = [
-          'view_dashboard', 'view_sales', 'create_sales', 'view_pos', 
-          'manage_customers', 'view_borrow', 'create_borrow', 'manage_borrow', 
-          'view_products', 'view_categories', 'view_stock', 'view_notifications'
+          'view_dashboard', 'view_reports', 'export_reports', 'print_reports',
+          'view_sales', 'create_sales', 'edit_sales', 'delete_sales', 'view_pos', 
+          'manage_customers', 'create_customers', 'edit_customers', 'delete_customers',
+          'view_borrow', 'create_borrow', 'manage_borrow', 'delete_borrow',
+          'view_products', 'view_categories', 'view_stock', 'view_stock_history',
+          'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications'
         ];
         if (allowedSalesPerms.includes(permissionName)) {
           return next();

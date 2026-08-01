@@ -18,7 +18,7 @@ const MANDATORY_ERP_FIELDS = [
   { key: 'category', label: 'Category', required: true, aliases: ['category', 'cat', 'category name', 'group', 'product category'] },
   { key: 'unit', label: 'Unit of Measure', required: true, aliases: ['unit', 'uom', 'unit of measure', 'pkg', 'unit name'] },
   { key: 'purchasePrice', label: 'Purchase Price (Cost)', required: true, aliases: ['purchase price', 'purchase_price', 'cost price', 'cost', 'buy price', 'purchase rate', 'cost_price'] },
-  { key: 'sellingPrice', label: 'Selling Price (Rate)', required: true, aliases: ['selling price', 'selling_price', 'sale price', 'rate', 'selling rate', 'price', 'mrp rate'] }
+  { key: 'sellingPrice', label: 'Selling Price (Rate)', required: true, aliases: ['selling price', 'selling_price', 'sale price', 'selling rate', 'sale rate', 'sale_price', 'selling_rate'] }
 ];
 
 const OPTIONAL_ERP_FIELDS = [
@@ -174,16 +174,34 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
 
         // Auto Map Columns
         const autoMap = {};
+        const assignedHeaders = new Set();
+
         ALL_ERP_FIELDS.forEach(erpField => {
-          const matchedHeader = headers.find(h => {
+          // 1. Try exact match first
+          let matchedHeader = headers.find(h => {
+            if (assignedHeaders.has(h)) return false;
             const hLower = h.toLowerCase().replace(/[^a-z0-9]/g, '');
             return erpField.aliases.some(alias => {
               const aLower = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
-              return hLower === aLower || hLower.includes(aLower);
+              return hLower === aLower;
             });
           });
+
+          // 2. Try substring match if no exact match found
+          if (!matchedHeader) {
+            matchedHeader = headers.find(h => {
+              if (assignedHeaders.has(h)) return false;
+              const hLower = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+              return erpField.aliases.some(alias => {
+                const aLower = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
+                return aLower.length >= 4 && (hLower.includes(aLower) || aLower.includes(hLower));
+              });
+            });
+          }
+
           if (matchedHeader) {
             autoMap[erpField.key] = matchedHeader;
+            assignedHeaders.add(matchedHeader);
           } else {
             autoMap[erpField.key] = '';
           }
@@ -202,15 +220,19 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
 
   // Step 2: Validate Column Mapping
   const validateColumnMapping = (currentMap) => {
-    const missingMandatory = [];
+    const errors = [];
     MANDATORY_ERP_FIELDS.forEach(m => {
       if (!currentMap[m.key] || currentMap[m.key] === '') {
-        missingMandatory.push(m.label);
+        errors.push(m.label);
       }
     });
 
-    setMappingErrors(missingMandatory);
-    return missingMandatory.length === 0;
+    if (currentMap.purchasePrice && currentMap.sellingPrice && currentMap.purchasePrice === currentMap.sellingPrice) {
+      errors.push(`Purchase Price & Selling Price cannot be mapped to the same column ('${currentMap.purchasePrice}')`);
+    }
+
+    setMappingErrors(errors);
+    return errors.length === 0;
   };
 
   const handleMapChange = (erpKey, selectedHeader) => {

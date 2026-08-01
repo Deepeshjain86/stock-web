@@ -13,7 +13,10 @@ export const getStockSummary = async (req, res, next) => {
              COALESCE(s.warehouse_id, 1) as warehouse_id, 
              COALESCE(w.name, 'Main Storage') as warehouse_name, 
              COALESCE(SUM(s.quantity), 0) as quantity,
-             (GREATEST(0, COALESCE(SUM(s.quantity), 0)) * COALESCE(p.purchase_price, 0)) as stock_valuation
+             COALESCE(
+               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
+               (GREATEST(0, COALESCE(SUM(s.quantity), 0)) * COALESCE(p.purchase_price, 0))
+             ) as stock_valuation
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN sub_categories sc ON p.sub_category_id = sc.id
@@ -98,14 +101,15 @@ export const adjustStock = async (req, res, next) => {
     // ── Synchronize purchase_batches for manual stock adjustment ──────────────
     const changeAmount = newQty - currentQty;
     if (changeAmount > 0) {
-      const [[prod]] = await connection.query('SELECT mrp, selling_price FROM products WHERE id = ?', [product_id]);
+      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [product_id]);
       const defaultMrp = Number(prod?.mrp || 0);
       const defaultSellingPrice = Number(prod?.selling_price || 0);
+      const defaultPurchasePrice = Number(prod?.purchase_price || 0);
 
       await connection.query(
-        `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, mrp, selling_price, warehouse_id)
-         VALUES (?, ?, ?, ?, CURRENT_DATE(), ?, ?, ?)`,
-        [product_id, `ADJ-BATCH-${Date.now()}`, changeAmount, changeAmount, defaultMrp, defaultSellingPrice, warehouse_id]
+        `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, purchase_price, mrp, selling_price, warehouse_id)
+         VALUES (?, ?, ?, ?, CURRENT_DATE(), ?, ?, ?, ?)`,
+        [product_id, `ADJ-BATCH-${Date.now()}`, changeAmount, changeAmount, defaultPurchasePrice, defaultMrp, defaultSellingPrice, warehouse_id]
       );
     } else if (changeAmount < 0) {
       let remDeduct = Math.abs(changeAmount);
@@ -367,6 +371,28 @@ export const getStockLogs = async (req, res, next) => {
       count: logs.length,
       logs
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get all stock transfers
+// @route   GET /api/stock/transfers
+// @access  Private
+export const getStockTransfers = async (req, res, next) => {
+  try {
+    const [transfers] = await req.db.query(`
+      SELECT st.*, 
+             fw.name as from_warehouse_name, 
+             tw.name as to_warehouse_name,
+             COALESCE(u.name, 'Admin') as created_by_name
+      FROM stock_transfers st
+      LEFT JOIN warehouses fw ON st.from_warehouse_id = fw.id
+      LEFT JOIN warehouses tw ON st.to_warehouse_id = tw.id
+      LEFT JOIN users u ON st.created_by = u.id
+      ORDER BY st.created_at DESC
+    `);
+    return res.status(200).json({ success: true, transfers });
   } catch (error) {
     next(error);
   }

@@ -347,9 +347,7 @@ export const createProduct = async (req, res, next) => {
       ]
     );
 
-    const productId = result.insertId;
-
-    // Always initialize current stock = 0 for every newly created product per SaaS rule
+    // Newly created products default stock to 0. Stock is added via Purchase Invoices or Stock Adjustments.
     await req.db.query(
       'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE quantity = 0',
       [productId, warehouseIdVal]
@@ -714,7 +712,7 @@ export const bulkImportProducts = async (req, res, next) => {
 
       const productId = resIns.insertId;
 
-      // Always initialize current stock = 0 for imported products regardless of file contents
+      // Newly imported products default stock to 0. Stock is added via Purchase Invoices or Stock Adjustments.
       await connection.query(
         'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE quantity = 0',
         [productId, warehouseId]

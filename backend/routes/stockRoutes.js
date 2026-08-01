@@ -1,5 +1,5 @@
 import express from 'express';
-import { getStockSummary, adjustStock, transferStock, getStockLogs, getStockAlerts } from '../controllers/stockController.js';
+import { getStockSummary, adjustStock, transferStock, getStockLogs, getStockAlerts, getStockTransfers } from '../controllers/stockController.js';
 import { 
   getStockDestroys, 
   getStockDestroyKPIs, 
@@ -15,6 +15,8 @@ router.use(protect); // Require login for inventory updates
 
 router.get('/', checkPermission('view_stock'), getStockSummary);
 router.get('/logs', checkPermission('view_stock'), getStockLogs);
+router.get('/history', checkPermission('view_stock'), getStockLogs);
+router.get('/transfers', checkPermission('view_stock'), getStockTransfers);
 router.get('/alerts', checkPermission('view_stock'), getStockAlerts);
 router.post('/adjust', checkPermission('adjust_stock'), readOnlyForSuperAdmin, adjustStock);
 router.post('/transfer', checkPermission('transfer_stock'), readOnlyForSuperAdmin, transferStock);

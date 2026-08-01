@@ -7,7 +7,13 @@ import {
   calculateNetProfit,
   calculateStockCounts,
   calculateStockDestroy,
-  calculateBorrowLedger
+  calculateBorrowLedger,
+  calculateStockAging,
+  calculateInventoryTurnover,
+  calculateABCAnalysis,
+  calculateReservedStockMetrics,
+  calculateBatchValuationReport,
+  validateInventoryConsistency
 } from '../services/calculationService.js';
 
 // @desc    Get dashboard metrics / KPIs for tenant
@@ -46,9 +52,16 @@ export const getDashboardKPIs = async (req, res, next) => {
         AND t.active_expiry <= CURRENT_DATE()
     `);
 
-    // Category Distribution (Valuation & products count per category)
+    // Category Distribution (Valuation & products count per category using FIFO batch cost)
     const [categoryDist] = await req.db.query(`
-      SELECT c.name as name, COUNT(p.id) as value, GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0)) as valuation
+      SELECT c.name as name, COUNT(p.id) as value,
+             COALESCE(
+               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) 
+                FROM purchase_batches pb 
+                JOIN products pr2 ON pb.product_id = pr2.id 
+                WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
+               GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
+             ) as valuation
       FROM categories c
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
@@ -121,9 +134,16 @@ export const getDashboardCharts = async (req, res, next) => {
       });
     }
 
-    // 2. Category Distribution (Valuation & products count per category)
+    // 2. Category Distribution (Valuation & products count per category using FIFO batch cost)
     const [categoryDist] = await req.db.query(`
-      SELECT c.name as name, COUNT(p.id) as value, GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0)) as valuation
+      SELECT c.name as name, COUNT(p.id) as value,
+             COALESCE(
+               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) 
+                FROM purchase_batches pb 
+                JOIN products pr2 ON pb.product_id = pr2.id 
+                WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
+               GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
+             ) as valuation
       FROM categories c
       LEFT JOIN products p ON c.id = p.category_id
       LEFT JOIN stock s ON p.id = s.product_id
@@ -185,8 +205,14 @@ export const getInventoryReport = async (req, res, next) => {
     const { categoryId, brandId, search } = req.query;
     let query = `
       SELECT p.id, p.name, p.barcode, COALESCE(b.name, '') as brand, COALESCE(sc.name, '') as sub_category, c.name as category, p.unit, p.purchase_price, p.selling_price,
-             COALESCE(SUM(s.quantity), 0) as stock_level,
-             GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0)) as valuation
+             COALESCE(
+               (SELECT SUM(pb.remaining_quantity) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
+               COALESCE(SUM(s.quantity), 0)
+             ) as stock_level,
+             COALESCE(
+               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
+               GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
+             ) as valuation
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN sub_categories sc ON p.sub_category_id = sc.id
@@ -555,7 +581,10 @@ export const getVendorInventoryReport = async (req, res, next) => {
       SELECT v.id as vendor_id, v.name as vendor_name, 
              pr.id as product_id, pr.name as product_name, pr.barcode, pr.unit,
              COALESCE(SUM(s.quantity), 0) as stock_level, 
-             COALESCE(SUM(s.quantity * pr.purchase_price), 0) as valuation
+             COALESCE(
+               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = pr.id AND pb.supplier_id = v.id AND pb.remaining_quantity > 0),
+               COALESCE(SUM(s.quantity * pr.purchase_price), 0)
+             ) as valuation
       FROM vendors v
       JOIN stock s ON v.id = s.vendor_id
       JOIN products pr ON s.product_id = pr.id
@@ -771,10 +800,15 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
         salesReturns: salesCalc.salesReturns,
         totalPurchases: purchCalc.netPurchaseExpenses,
         grossPurchases: purchCalc.grossPurchases,
+        netPurchaseSubtotalExclTax: purchCalc.netSubtotalExclTax,
+        purchaseGst: purchCalc.totalGst > 0 ? purchCalc.totalGst : purchCalc.stockGst,
+        stockGst: purchCalc.stockGst,
         vendorReturns: purchCalc.vendorReturns,
         stockDestroyCost: destroyCalc.destroyCost,
         stockDestroyQty: destroyCalc.destroyQty,
         borrowOutstanding: borrowCalc.borrowOutstanding,
+        totalBorrow: borrowCalc.totalBorrow,
+        totalPaid: borrowCalc.totalPaid,
         inventoryValue: invValuation,
         lowStockCount: stockCounts.lowStockCount,
         outOfStockCount: stockCounts.outOfStockCount,
@@ -1040,6 +1074,72 @@ export const getInventorySummary = async (req, res, next) => {
         totalInventoryValue
       }
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Stock Aging Report
+// @route   GET /api/reports/stock-aging
+export const getStockAgingReport = async (req, res, next) => {
+  try {
+    const report = await calculateStockAging(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Inventory Turnover & Velocity Report
+// @route   GET /api/reports/inventory-turnover
+export const getInventoryTurnoverReport = async (req, res, next) => {
+  try {
+    const report = await calculateInventoryTurnover(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get ABC Inventory Analysis Report
+// @route   GET /api/reports/abc-analysis
+export const getABCAnalysisReport = async (req, res, next) => {
+  try {
+    const report = await calculateABCAnalysis(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Batch-by-Batch Valuation Report
+// @route   GET /api/reports/batch-valuation
+export const getBatchValuationReport = async (req, res, next) => {
+  try {
+    const report = await calculateBatchValuationReport(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Reserved Stock & Available Stock Metrics
+// @route   GET /api/reports/reserved-stock
+export const getReservedStockReport = async (req, res, next) => {
+  try {
+    const report = await calculateReservedStockMetrics(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Automated Inventory Reconciliation & Consistency Validation
+// @route   GET /api/reports/inventory-reconciliation
+export const getInventoryReconciliationReport = async (req, res, next) => {
+  try {
+    const report = await validateInventoryConsistency(req.db);
+    return res.status(200).json({ success: true, report });
   } catch (error) {
     next(error);
   }

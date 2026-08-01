@@ -250,10 +250,10 @@ const StaffList = () => {
     const availableStaffRoles = roles.filter(r => r.name !== 'Admin');
     let defaultRole = availableStaffRoles[0]?.id || '';
     if (user?.role === 'Sales Manager') {
-      const empRole = availableStaffRoles.find(r => r.name === 'Sales Employee');
+      const empRole = availableStaffRoles.find(r => r.name === 'Sales Employee' || r.name === 'Employee');
       if (empRole) defaultRole = empRole.id;
     } else if (user?.role === 'Purchase Manager') {
-      const empRole = availableStaffRoles.find(r => r.name === 'Purchase Employee');
+      const empRole = availableStaffRoles.find(r => r.name === 'Purchase Employee' || r.name === 'Employee');
       if (empRole) defaultRole = empRole.id;
     }
     const defDept = user?.role === 'Sales Manager' ? 'Sales' : user?.role === 'Purchase Manager' ? 'Purchase' : '';
@@ -349,13 +349,27 @@ const StaffList = () => {
 
     setSubmitting(true);
     try {
+      let targetRoleId = Number(formData.role_id);
+      if (!targetRoleId || isNaN(targetRoleId)) {
+        if (user?.role === 'Sales Manager') {
+          const empRole = roles.find(r => r.name === 'Sales Employee' || r.name === 'Employee');
+          if (empRole) targetRoleId = empRole.id;
+        } else if (user?.role === 'Purchase Manager') {
+          const empRole = roles.find(r => r.name === 'Purchase Employee' || r.name === 'Employee');
+          if (empRole) targetRoleId = empRole.id;
+        } else if (roles.length > 0) {
+          const defaultEmp = roles.find(r => r.name !== 'Admin') || roles[0];
+          if (defaultEmp) targetRoleId = defaultEmp.id;
+        }
+      }
+
       const payload = {
         name: formData.name.trim(),
         email: formData.email.trim(),
         contact: formData.contact?.trim() || '',
-        role_id: Number(formData.role_id),
+        role_id: targetRoleId,
         status: formData.status,
-        department: formData.department,
+        department: formData.department || (user?.role === 'Sales Manager' ? 'Sales' : user?.role === 'Purchase Manager' ? 'Purchase' : ''),
         permission_ids: selectedPerms
       };
       if (formData.password) {

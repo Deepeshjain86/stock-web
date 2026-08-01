@@ -346,17 +346,26 @@ export const createSale = async (req, res, next) => {
       }
     }
 
-    // Determine actual amount paid
-    let amtPaid = 0;
-    if (paymentStatus === 'Paid') {
-      amtPaid = Number(total || 0);
-    } else if (paymentStatus === 'Partial') {
-      amtPaid = Math.min(Number(total || 0), paymentsSum > 0 ? paymentsSum : Number(amountPaid || 0));
-    } else {
-      amtPaid = Math.min(Number(total || 0), paymentsSum);
-    }
+    // Determine actual non-credit amount paid vs credit dues
+    const nonCreditPaymentsSum = finalPayments.filter(p => 
+      p.paymentMethod !== 'Credit / Udhaar' && p.paymentMethod !== 'Credit/Borrow'
+    ).reduce((acc, p) => acc + (Number(p.amount || p.amountPaid) || 0), 0);
 
-    const dueAmt = Math.max(0, Number(total || 0) - amtPaid);
+    const creditPaymentsSum = finalPayments.filter(p => 
+      p.paymentMethod === 'Credit / Udhaar' || p.paymentMethod === 'Credit/Borrow'
+    ).reduce((acc, p) => acc + (Number(p.amount || p.amountPaid) || 0), 0);
+
+    let amtPaid = Math.min(Number(total || 0), nonCreditPaymentsSum > 0 ? nonCreditPaymentsSum : Number(amountPaid || 0));
+    let dueAmt = creditPaymentsSum > 0 ? creditPaymentsSum : Math.max(0, Number(total || 0) - amtPaid);
+
+    let calculatedPaymentStatus = paymentStatus;
+    if (dueAmt > 0 && amtPaid > 0) {
+      calculatedPaymentStatus = 'Partial';
+    } else if (dueAmt > 0 && amtPaid === 0) {
+      calculatedPaymentStatus = 'Pending';
+    } else if (dueAmt === 0) {
+      calculatedPaymentStatus = 'Paid';
+    }
 
     // Insert Sale header
     const [result] = await connection.query(
@@ -365,8 +374,8 @@ export const createSale = async (req, res, next) => {
       [
         invoiceNo, finalCustomerId, Number(warehouseId), req.user.id, date, 
         subtotal || 0, discount || 0, gstAmount || 0, total || 0,
-        paymentStatus, primaryPaymentMethod, amtPaid, dueAmt, dueAmt,
-        paymentStatus === 'Paid' ? date : null
+        calculatedPaymentStatus, primaryPaymentMethod, amtPaid, dueAmt, dueAmt,
+        calculatedPaymentStatus === 'Paid' ? date : null
       ]
     );
 
@@ -394,7 +403,11 @@ export const createSale = async (req, res, next) => {
     for (const item of items) {
       const pId = Number(item.productId || item.product_id);
       const qtyNeeded = Number(item.quantity);
-      const sPrice = Number(item.sellingPrice || item.selling_price || item.price || (item.quantity ? item.total / item.quantity : 0));
+      let sPrice = Number(item.sellingPrice || item.selling_price || item.price || (item.quantity ? item.total / item.quantity : 0));
+      if (isNaN(sPrice) || sPrice <= 0) {
+        const [[prod]] = await connection.query('SELECT selling_price, mrp FROM products WHERE id = ?', [pId]);
+        sPrice = Number(prod?.selling_price || prod?.mrp || 0);
+      }
       const defaultMrp = Number(item.mrp || item.max_retail_price || 0);
 
       // Total stock before deduction
@@ -499,10 +512,10 @@ export const createSale = async (req, res, next) => {
     }
 
     // Borrow Customer Credit Handling
-    if (customerType === 'Borrow' && paymentStatus !== 'Paid') {
+    if ((customerType === 'Borrow' || finalCustomerId !== 1) && dueAmt > 0) {
       const grandTotal = Number(total);
-      const paid = paymentStatus === 'Partial' ? Number(amountPaid || 0) : 0;
-      const remaining = Math.max(0, grandTotal - paid);
+      const paid = amtPaid;
+      const remaining = dueAmt;
 
       let finalDueDate = dueDate;
       if (!finalDueDate) {
@@ -548,6 +561,12 @@ export const createSale = async (req, res, next) => {
           [finalCustomerId, paid, date, `Upfront payment for invoice: ${invoiceNo}`]
         );
       }
+
+      // Update customer outstanding_balance in real-time
+      await connection.query(
+        `UPDATE customers SET outstanding_balance = GREATEST(0, COALESCE(outstanding_balance, 0) + ?) WHERE id = ?`,
+        [remaining, finalCustomerId]
+      );
     }
 
     await connection.commit();

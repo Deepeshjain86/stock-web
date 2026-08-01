@@ -70,14 +70,18 @@ export const getPlatformKPIs = async (req, res, next) => {
       })
     );
 
-    // Calculate actual active paid SaaS income from active subscriptions table
-    const [activeSubRes] = await masterPool.query(`
-      SELECT COALESCE(SUM(CAST(s.amount AS DECIMAL(10,2))), 0) as totalRevenue
-      FROM subscriptions s
-      JOIN tenants t ON s.tenant_id = t.id
-      WHERE s.status = 'Active' AND s.payment_status = 'Paid' AND t.subscription_status = 'Active'
-    `);
-    const platformRevenue = Number(activeSubRes[0]?.totalRevenue || 0);
+    // Calculate actual active paid SaaS income from billing_history table
+    let platformRevenue = 0;
+    try {
+      const [activeSubRes] = await masterPool.query(`
+        SELECT COALESCE(SUM(amount), 0) as totalRevenue
+        FROM billing_history
+        WHERE payment_status = 'Paid'
+      `);
+      platformRevenue = Number(activeSubRes[0]?.totalRevenue || 0);
+    } catch (err) {
+      console.warn('[KPI] billing_history query error:', err.message);
+    }
 
     return res.status(200).json({
       success: true,
@@ -117,14 +121,27 @@ export const getStores = async (req, res, next) => {
     `);
 
     const storesWithDetails = await Promise.all(stores.map(async (store) => {
-      const [subs] = await masterPool.query(
-        'SELECT * FROM subscriptions WHERE tenant_id = ? ORDER BY created_at DESC',
-        [store.id]
-      );
-      const [bills] = await masterPool.query(
-        'SELECT * FROM billing_history WHERE tenant_id = ? ORDER BY billing_date DESC',
-        [store.id]
-      );
+      let subs = [];
+      try {
+        const [subLogs] = await masterPool.query(
+          'SELECT * FROM subscription_logs WHERE tenant_id = ? ORDER BY created_at DESC',
+          [store.id]
+        );
+        subs = subLogs;
+      } catch (err) {
+        subs = [];
+      }
+
+      let bills = [];
+      try {
+        const [billHistory] = await masterPool.query(
+          'SELECT * FROM billing_history WHERE tenant_id = ? ORDER BY billing_date DESC',
+          [store.id]
+        );
+        bills = billHistory;
+      } catch (err) {
+        bills = [];
+      }
 
       // Dynamically fetch actual Admin ID from tenant isolated database as persistent source of truth
       let adminId = store.admin_id;

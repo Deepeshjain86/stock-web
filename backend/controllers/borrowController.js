@@ -15,7 +15,8 @@ export const getBorrowSummary = async (req, res, next) => {
              COALESCE(SUM(CASE WHEN bt.payment_status = 'Overdue' OR (bt.payment_status != 'Paid' AND bt.due_date < CURRENT_DATE()) THEN bt.remaining_amount ELSE 0 END), 0) as overdue_balance
       FROM customers c
       LEFT JOIN borrow_transactions bt ON c.id = bt.customer_id
-      WHERE 1=1
+      WHERE (c.customer_type = 'Borrow' OR c.id IN (SELECT DISTINCT customer_id FROM borrow_transactions))
+        AND c.name != 'Walk-in Customer'
     `;
     const queryParams = [];
 
@@ -31,9 +32,11 @@ export const getBorrowSummary = async (req, res, next) => {
 
     const [totals] = await req.db.query(`
       SELECT 
-        COALESCE(SUM(remaining_amount), 0) as total_pending,
-        COALESCE(SUM(CASE WHEN payment_status != 'Paid' AND due_date < CURRENT_DATE() THEN remaining_amount ELSE 0 END), 0) as total_overdue
-      FROM borrow_transactions
+        COALESCE(SUM(bt.remaining_amount), 0) as total_pending,
+        COALESCE(SUM(CASE WHEN bt.payment_status != 'Paid' AND bt.due_date < CURRENT_DATE() THEN bt.remaining_amount ELSE 0 END), 0) as total_overdue
+      FROM borrow_transactions bt
+      JOIN customers c ON bt.customer_id = c.id
+      WHERE c.name != 'Walk-in Customer'
     `);
 
     return res.status(200).json({ 
@@ -62,7 +65,7 @@ export const getBorrowTransactions = async (req, res, next) => {
              END as current_payment_status
       FROM borrow_transactions bt
       JOIN customers c ON bt.customer_id = c.id
-      WHERE 1=1
+      WHERE c.name != 'Walk-in Customer'
     `;
     const queryParams = [];
 
@@ -107,7 +110,7 @@ export const getBorrowHistory = async (req, res, next) => {
       SELECT br.*, c.name as customer_name, c.phone as customer_phone, c.customer_code
       FROM borrow_records br
       JOIN customers c ON br.customer_id = c.id
-      WHERE 1=1
+      WHERE c.name != 'Walk-in Customer'
     `;
     const queryParams = [];
 
@@ -331,6 +334,12 @@ export const addPaybackPayment = async (req, res, next) => {
     await connection.query(
       'INSERT INTO borrow_records (customer_id, amount, type, date, notes) VALUES (?, ?, ?, ?, ?)',
       [customer_id, payAmt, 'Payback', date, remarks || 'Udhaar Payback Payment']
+    );
+
+    // Update customer outstanding_balance in real-time
+    await connection.query(
+      'UPDATE customers SET outstanding_balance = GREATEST(0, COALESCE(outstanding_balance, 0) - ?) WHERE id = ?',
+      [payAmt, customer_id]
     );
 
     await connection.commit();

@@ -1132,6 +1132,7 @@ const Toast = ({ toast }) => {
 const ALL_PAYMENT_MODES = [
   'Cash',
   'UPI',
+  'Credit / Udhaar',
   'Credit/Debit Card',
   'Bank Transfer',
   'Wallet',
@@ -1444,10 +1445,10 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
 
     // Auto-sync single payment mode amount when cart items / total changes
     useEffect(() => {
-        if (paymentRows.length === 1 && (paymentRows[0].amount === '' || paymentRows[0].isAuto)) {
+        if (customerType === 'Walk-in' && paymentRows.length === 1 && (paymentRows[0].amount === '' || paymentRows[0].isAuto)) {
             setPaymentRows([{ ...paymentRows[0], amount: grandTotal > 0 ? grandTotal : '', isAuto: true }]);
         }
-    }, [grandTotal]);
+    }, [grandTotal, customerType]);
 
     const invoiceNumber = `INV-${new Date().getFullYear()}-${String(
         Math.floor(Math.random() * 9000) + 1000
@@ -1499,31 +1500,43 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
             return;
         }
 
-        const validPaymentRows = paymentRows.filter(r => Number(r.amount) > 0);
-        if (validPaymentRows.length === 0 && grandTotal > 0 && customerType !== 'Borrow') {
-            showToast('Please enter at least one valid payment amount.');
-            return;
-        }
+        // Calculate non-credit actual money collected vs credit amounts
+        const nonCreditRows = paymentRows.filter(r => 
+            r.paymentMethod !== 'Credit / Udhaar' && 
+            r.paymentMethod !== 'Credit/Borrow' && 
+            Number(r.amount) > 0
+        );
+        const creditRows = paymentRows.filter(r => 
+            (r.paymentMethod === 'Credit / Udhaar' || r.paymentMethod === 'Credit/Borrow') && 
+            Number(r.amount) > 0
+        );
 
-        if (remainingBalance > 0 && customerType !== 'Borrow') {
-            showToast(`Remaining balance is ₹${remainingBalance.toFixed(2)}. Unpaid / Credit sales require a registered Borrow Customer profile.`);
+        const actualMoneyCollected = nonCreditRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const explicitCreditAmount = creditRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+        const effectiveDueAmount = Math.max(0, explicitCreditAmount > 0 ? explicitCreditAmount : (grandTotal - actualMoneyCollected));
+        const effectiveAmountPaid = Math.min(grandTotal, actualMoneyCollected);
+
+        if (effectiveDueAmount > 0 && customerType !== 'Borrow') {
+            showToast(`Unpaid credit balance of ₹${effectiveDueAmount.toFixed(2)} requires selecting a Borrow Customer profile.`);
             return;
         }
 
         if (customerType === 'Borrow' && (!customerId || customerId === 1)) {
-            showToast('You must select or register a Borrow Customer first.');
+            showToast('You must select or register a Borrow Customer profile for credit billing.');
             return;
         }
 
-        const finalPaymentStatus = remainingBalance === 0 ? 'Paid' : (totalPaymentsEntered > 0 ? 'Partial' : 'Pending');
+        const finalPaymentStatus = effectiveDueAmount <= 0 ? 'Paid' : (effectiveAmountPaid > 0 ? 'Partial' : 'Pending');
 
+        const validPaymentRows = paymentRows.filter(r => Number(r.amount) > 0);
         let primaryPaymentMethodText = 'Cash';
         if (validPaymentRows.length === 1) {
             primaryPaymentMethodText = validPaymentRows[0].paymentMethod;
         } else if (validPaymentRows.length > 1) {
             primaryPaymentMethodText = `Split (${validPaymentRows.map(p => `${p.paymentMethod} ₹${p.amount}`).join(' + ')})`;
-        } else if (remainingBalance > 0) {
-            primaryPaymentMethodText = 'Credit/Borrow';
+        } else if (effectiveDueAmount > 0) {
+            primaryPaymentMethodText = 'Credit / Udhaar';
         }
 
         const payload = {
@@ -1531,9 +1544,9 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
             customerName: customerType === 'Walk-in' ? customerName || 'Walk-in Customer' : customerName,
             customerPhone: customerType === 'Walk-in' ? customerPhone : '',
             customerId: customerType === 'Borrow' ? customerId : 1,
-            dueDate: remainingBalance > 0 ? dueDate : null,
-            amountPaid: Math.min(grandTotal, totalPaymentsEntered),
-            dueAmount: remainingBalance,
+            dueDate: effectiveDueAmount > 0 ? dueDate : null,
+            amountPaid: effectiveAmountPaid,
+            dueAmount: effectiveDueAmount,
             paymentMethod: primaryPaymentMethodText,
             payments: validPaymentRows.map(r => ({
                 paymentMethod: r.paymentMethod,
@@ -1953,6 +1966,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     setCustomerName('Walk-in Customer');
                                     setCustomerPhone('');
                                     setPaymentMethod('Cash');
+                                    setPaymentRows([{ id: 1, paymentMethod: 'Cash', amount: grandTotal > 0 ? grandTotal : '', isAuto: true }]);
                                 }}
                                 className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
                                     customerType === 'Walk-in'
@@ -1978,7 +1992,8 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                         setCustomerName('');
                                         setCustomerPhone('');
                                     }
-                                    setPaymentMethod('Credit/Borrow');
+                                    setPaymentMethod('Credit / Udhaar');
+                                    setPaymentRows([{ id: 1, paymentMethod: 'Credit / Udhaar', amount: 0, isAuto: false }]);
                                 }}
                                 className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
                                     customerType === 'Borrow'
@@ -2252,8 +2267,8 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 </div>
 
                 {/* ─── COLUMN 3: SUMMARY & CHECKOUT ─── */}
-                <div className="lg:col-span-3 flex flex-col bg-white dark:bg-[#11141f] border border-gray-200 dark:border-slate-800 rounded-2xl p-4 gap-4 overflow-y-auto shadow-sm dark:shadow-xl dark:shadow-black/20 justify-between">
-                    <div className="space-y-4">
+                <div className="lg:col-span-3 flex flex-col h-full overflow-hidden bg-white dark:bg-[#11141f] border border-gray-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm dark:shadow-xl dark:shadow-black/20">
+                    <div className="flex-1 overflow-y-auto pr-1 space-y-4">
                         <div>
                             <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center gap-2 border-b border-gray-200 dark:border-slate-800 pb-2.5">
                                 <DocumentArrowDownIcon className="w-4 h-4 text-[#0F4C3A] dark:text-emerald-400" /> Summary
@@ -2306,13 +2321,25 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     <CreditCardIcon className="w-4 h-4 text-[#0F4C3A] dark:text-emerald-400" /> Payment Breakdown
                                     <span className="text-[9px] font-mono bg-slate-100 dark:bg-[#0d101a] border border-slate-200 dark:border-slate-800 px-1.5 py-0.5 rounded text-slate-500 font-bold">F6</span>
                                 </h3>
-                                <button
-                                    type="button"
-                                    onClick={handleAddPaymentRow}
-                                    className="flex items-center gap-1 text-[10px] font-black text-[#0F4C3A] dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700 transition-all cursor-pointer shadow-xs active:scale-95"
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5" /> + Add Split Mode
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                    {customerType === 'Borrow' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setPaymentRows([{ id: 1, paymentMethod: 'Credit / Udhaar', amount: 0 }])}
+                                            className="flex items-center gap-1 text-[10px] font-black text-amber-800 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-lg border border-amber-500/30 transition-all cursor-pointer shadow-xs active:scale-95"
+                                            title="Mark 100% of bill as Udhaar Credit"
+                                        >
+                                            🤝 Full Udhaar
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleAddPaymentRow}
+                                        className="flex items-center gap-1 text-[10px] font-black text-[#0F4C3A] dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700 transition-all cursor-pointer shadow-xs active:scale-95"
+                                    >
+                                        <PlusIcon className="w-3.5 h-3.5" /> + Split Mode
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Itemized Payment Rows */}
@@ -2321,12 +2348,15 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                     const isCash = row.paymentMethod === 'Cash';
                                     const isUpi = row.paymentMethod === 'UPI';
                                     const isCard = row.paymentMethod.includes('Card');
+                                    const isBorrow = row.paymentMethod.includes('Udhaar');
                                     
                                     return (
                                         <div
                                             key={row.id}
                                             className={`p-2.5 rounded-xl border transition-all ${
-                                                isCash
+                                                isBorrow
+                                                    ? 'bg-amber-50/60 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50'
+                                                    : isCash
                                                     ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50'
                                                     : isUpi
                                                     ? 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800/50'
@@ -2351,6 +2381,9 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                                         <option value="Cheque">📄 Cheque</option>
                                                         <option value="Gift Voucher">🎁 Gift Voucher</option>
                                                         <option value="Store Credit">🏷️ Store Credit</option>
+                                                        {customerType === 'Borrow' && (
+                                                            <option value="Credit / Udhaar">🤝 Credit / Udhaar (Borrow Ledger)</option>
+                                                        )}
                                                     </select>
                                                 </div>
 
@@ -2446,29 +2479,74 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                 )}
                             </div>
 
-                            {/* Borrow Customer Due Date Selector */}
-                            {remainingBalance > 0 && (
-                                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-xl space-y-1.5 text-xs">
-                                    <div className="text-[10px] font-black uppercase text-amber-900 dark:text-amber-200 tracking-wider">
-                                        Udhaar / Credit Customer Due Date
+                            {/* DEDICATED BORROW / UDHAAR SETTLEMENT PANEL */}
+                            {customerType === 'Borrow' && (
+                                <div className="p-3.5 bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/30 dark:border-amber-700/60 rounded-2xl space-y-3">
+                                    <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 bg-amber-600 text-white rounded-lg font-black text-xs">
+                                                🤝 UDHAAR
+                                            </div>
+                                            <div>
+                                                <h4 className="text-xs font-black text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                                                    Borrow Credit Settlement
+                                                </h4>
+                                                <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                                                    Customer: {customerName || 'No profile selected'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <span className="px-2 py-0.5 bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 rounded text-[9px] font-black uppercase">
+                                            Udhaar Billing Active
+                                        </span>
                                     </div>
-                                    <input
-                                        type="date"
-                                        value={dueDate}
-                                        onChange={(e) => setDueDate(e.target.value)}
-                                        className="w-full px-3 py-1.5 border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-[#0d101a] text-amber-900 dark:text-amber-100 font-bold text-center cursor-pointer"
-                                    />
-                                    {customerType !== 'Borrow' && (
-                                        <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400">
-                                          ⚠️ Unpaid balance of ₹{remainingBalance.toFixed(2)} requires choosing a Borrow Customer profile before billing.
+
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div className="p-2 bg-white dark:bg-[#121824] border border-amber-300 dark:border-amber-800/60 rounded-xl">
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase block">Grand Total</span>
+                                            <span className="font-mono text-sm font-black text-slate-800 dark:text-slate-100">₹{grandTotal.toFixed(2)}</span>
+                                        </div>
+                                        <div className="p-2 bg-white dark:bg-[#121824] border border-amber-300 dark:border-amber-800/60 rounded-xl">
+                                            <span className="text-[9px] font-bold text-rose-500 uppercase block">Udhaar Dues</span>
+                                            <span className="font-mono text-sm font-black text-rose-600 dark:text-rose-400">₹{remainingBalance.toFixed(2)}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black uppercase text-amber-900 dark:text-amber-200 tracking-wider block">
+                                            Repayment Due Date *
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={dueDate}
+                                            onChange={(e) => setDueDate(e.target.value)}
+                                            className="w-full px-3 py-2 border border-amber-300 dark:border-amber-700 rounded-xl bg-white dark:bg-[#0d101a] text-amber-900 dark:text-amber-100 font-bold text-center cursor-pointer text-xs focus:ring-2 focus:ring-amber-500"
+                                        />
+                                    </div>
+
+                                    {!customerId || customerId === 1 ? (
+                                        <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 p-2 rounded-xl border border-rose-500/20">
+                                            ⚠️ Please select or register a Borrow Customer profile from top panel before completing sale.
+                                        </p>
+                                    ) : (
+                                        <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 p-2 rounded-xl border border-emerald-500/20 flex items-center gap-1.5">
+                                            <span>✅</span> Bill will automatically record <strong>₹{remainingBalance.toFixed(2)}</strong> credit in <strong>{customerName}</strong>'s Borrow Ledger.
                                         </p>
                                     )}
+                                </div>
+                            )}
+
+                            {customerType !== 'Borrow' && remainingBalance > 0 && (
+                                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700/60 rounded-xl text-xs space-y-1">
+                                    <p className="text-[10px] font-bold text-rose-700 dark:text-rose-300">
+                                        ⚠️ Unpaid balance of ₹{remainingBalance.toFixed(2)} requires switching to a Borrow Customer profile before billing.
+                                    </p>
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    <div className="space-y-2 border-t border-gray-200 dark:border-slate-800 pt-3.5">
+                    <div className="flex-shrink-0 pt-3 border-t border-gray-200 dark:border-slate-800 space-y-2 mt-2">
                         <button
                             onClick={handleSubmit}
                             type="button"

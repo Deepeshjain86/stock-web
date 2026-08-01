@@ -10,7 +10,13 @@ import {
   getVendorInventoryReport,
   getVendorReturnsReport,
   getAdvancedAnalyticsData,
-  getInventorySummary
+  getInventorySummary,
+  getStockAgingReport,
+  getInventoryTurnoverReport,
+  getABCAnalysisReport,
+  getBatchValuationReport,
+  getReservedStockReport,
+  getInventoryReconciliationReport
 } from '../controllers/reportController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
@@ -31,5 +37,11 @@ router.get('/vendor-purchases', getVendorPurchasesReport);
 router.get('/vendor-inventory', getVendorInventoryReport);
 router.get('/vendor-returns', getVendorReturnsReport);
 router.get('/advanced-analytics', getAdvancedAnalyticsData);
+router.get('/stock-aging', getStockAgingReport);
+router.get('/inventory-turnover', getInventoryTurnoverReport);
+router.get('/abc-analysis', getABCAnalysisReport);
+router.get('/batch-valuation', getBatchValuationReport);
+router.get('/reserved-stock', getReservedStockReport);
+router.get('/inventory-reconciliation', getInventoryReconciliationReport);
 
 export default router;

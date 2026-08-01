@@ -96,12 +96,12 @@ export const createUser = async (req, res, next) => {
       }
       dept = department || (roleName.includes('Purchase') ? 'Purchase' : (roleName.includes('Sales') ? 'Sales' : 'General'));
     } else if (req.user.role === 'Purchase Manager') {
-      if (roleName !== 'Purchase Employee') {
+      if (roleName !== 'Purchase Employee' && roleName !== 'Employee') {
         return res.status(403).json({ success: false, message: 'Purchase Manager can create only Purchase Employee accounts.' });
       }
       dept = 'Purchase';
     } else if (req.user.role === 'Sales Manager') {
-      if (roleName !== 'Sales Employee') {
+      if (roleName !== 'Sales Employee' && roleName !== 'Employee') {
         return res.status(403).json({ success: false, message: 'Sales Manager can create only Sales Employee accounts.' });
       }
       dept = 'Sales';
@@ -155,9 +155,9 @@ export const createUser = async (req, res, next) => {
     const nextSuffix = String(nextVal).padStart(4, '0');
     const generatedLoginId = `${prefix}${nextSuffix}`;
 
-    // Fetch next available employee_serial_id inside locked transaction
+    // Fetch next available employee_serial_id without locking table gap
     const [serialResult] = await connection.query(
-      'SELECT COALESCE(MAX(employee_serial_id), 0) + 1 AS next_serial FROM users FOR UPDATE'
+      'SELECT COALESCE(MAX(employee_serial_id), 0) + 1 AS next_serial FROM users'
     );
     const nextSerial = serialResult[0].next_serial;
 
@@ -506,9 +506,9 @@ export const getRoles = async (req, res, next) => {
     if (req.user.role === 'Admin') {
       queryStr = 'SELECT * FROM roles WHERE name != "Admin" ORDER BY id ASC';
     } else if (req.user.role === 'Purchase Manager') {
-      queryStr = 'SELECT * FROM roles WHERE name = "Purchase Employee" ORDER BY id ASC';
+      queryStr = 'SELECT * FROM roles WHERE name IN ("Purchase Employee", "Employee") ORDER BY id ASC';
     } else if (req.user.role === 'Sales Manager') {
-      queryStr = 'SELECT * FROM roles WHERE name = "Sales Employee" ORDER BY id ASC';
+      queryStr = 'SELECT * FROM roles WHERE name IN ("Sales Employee", "Employee") ORDER BY id ASC';
     }
 
     const [roles] = await req.db.query(queryStr);

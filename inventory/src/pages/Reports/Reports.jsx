@@ -166,6 +166,7 @@ const Reports = () => {
         productId: selectedProduct,
         categoryId: selectedCategory,
         brand: selectedBrand,
+        brandId: selectedBrand,
         vendorId: selectedVendor,
         customerId: selectedCustomer,
         employeeId: selectedEmployee,
@@ -748,27 +749,48 @@ const Reports = () => {
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
                       <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Sales (Net)</h4>
                       <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">₹{Number(analyticsData.kpis?.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1">{analyticsData.kpis?.salesCount || 0} Bills Settled</div>
+                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
+                        <span>{analyticsData.kpis?.salesCount || 0} Bills Settled</span>
+                        {Number(analyticsData.kpis?.salesReturns || 0) > 0 && (
+                          <span className="text-rose-500 font-bold">Returns Refunded: -₹{Number(analyticsData.kpis?.salesReturns).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
-                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Purchases (Net)</h4>
+                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Purchases (Net Paid)</h4>
                       <p className="text-lg font-black text-slate-900 dark:text-white mt-1">₹{Number(analyticsData.kpis?.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1">Vendor Returns: ₹{Number(analyticsData.kpis?.vendorReturns || 0).toLocaleString('en-IN')}</div>
+                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
+                        <span>Subtotal (Excl. Tax): ₹{Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-indigo-600 dark:text-indigo-400 font-bold">GST Tax: +₹{Number(analyticsData.kpis?.purchaseGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Returns: -₹{Number(analyticsData.kpis?.vendorReturns || 0).toLocaleString('en-IN')}</span>
+                      </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
                       <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Net Profit & Margin</h4>
                       <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">₹{Number(analyticsData.kpis?.profit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                      <div className="text-[10px] font-bold text-indigo-500 dark:text-indigo-300 mt-1">Margin: {analyticsData.kpis?.profitMargin || 0}%</div>
+                      <div className="text-[10px] font-bold text-indigo-500 dark:text-indigo-300 mt-1 flex flex-col gap-0.5">
+                        <span>Sales (₹{Number(analyticsData.kpis?.totalSales || 0).toLocaleString('en-IN')}) - COGS (₹{Number(analyticsData.kpis?.cogs || 0).toLocaleString('en-IN')})</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">Net Margin: {analyticsData.kpis?.profitMargin || 0}%</span>
+                      </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
-                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Inventory Valuation</h4>
+                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Inventory Valuation (Excl. Tax)</h4>
                       <p className="text-lg font-black text-blue-600 dark:text-blue-400 mt-1">₹{Number(analyticsData.kpis?.inventoryValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                      <div className="text-[10px] font-bold text-rose-500 mt-1">{analyticsData.kpis?.lowStockCount || 0} Low Stock Alert Items</div>
+                      <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
+                        <span className={Number(analyticsData.kpis?.inventoryValue || 0) === Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0) ? "text-emerald-600 dark:text-emerald-400 font-bold" : "text-slate-500 dark:text-slate-400 font-semibold"}>
+                          {Number(analyticsData.kpis?.inventoryValue || 0) === Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0)
+                            ? `✓ Matches Net Purchases Subtotal 100%`
+                            : `+ Sold COGS (₹${Number(analyticsData.kpis?.cogs || 0).toLocaleString('en-IN')}) = Subtotal (₹${Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0).toLocaleString('en-IN')})`}
+                        </span>
+                        <span>GST Credit: +₹{Number(analyticsData.kpis?.stockGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Incl. Tax: ₹{(Number(analyticsData.kpis?.inventoryValue || 0) + Number(analyticsData.kpis?.stockGst || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
                       <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Borrow (Udhaar) Ledger</h4>
                       <p className="text-lg font-black text-amber-600 dark:text-amber-400 mt-1">₹{Number(analyticsData.kpis?.borrowOutstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1">Customer Credit Due</div>
+                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
+                        <span>Total Credit Issued: ₹{Number(analyticsData.kpis?.totalBorrow || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">Recovered Paybacks: ₹{Number(analyticsData.kpis?.totalPaid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
                       <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Returns & Wastage Loss</h4>

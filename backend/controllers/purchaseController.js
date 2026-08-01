@@ -1106,12 +1106,16 @@ export const createPurchase = async (req, res, next) => {
     );
 
     const purchaseId = result.insertId;
-    const isLinkedToReceipt = !!grn_id || !!purchase_order_id;
+    const isLinkedToReceipt = !!grn_id;
 
     // Loop items to save & update stock
     for (const item of items) {
-      const itemMrp = Number(item.mrp || item.max_retail_price || 0);
-      const itemSellingPrice = Number(item.selling_price || item.price || 0);
+      const [[prod]] = await connection.query('SELECT mrp, selling_price FROM products WHERE id = ?', [item.product_id]);
+      const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
+      const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
+
+      const itemMrp = Number(item.mrp || item.max_retail_price || defaultProdMrp);
+      const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
 
       await connection.query(
         `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
@@ -1666,7 +1670,7 @@ export const createGRN = async (req, res, next) => {
         const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
 
         const itemMrp = item.mrp && Number(item.mrp) > 0 ? Number(item.mrp) : (item.max_retail_price && Number(item.max_retail_price) > 0 ? Number(item.max_retail_price) : defaultProdMrp);
-        const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : (item.price && Number(item.price) > 0 ? Number(item.price) : defaultProdSellingPrice);
+        const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
 
         // Create dedicated batch record in purchase_batches for FIFO inventory management
         await connection.query(

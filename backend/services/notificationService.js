@@ -75,21 +75,22 @@ export const createNotification = async (data, dbOverride = null) => {
       );
     }
 
-    // Self-Cleaning: Delete old notifications based on retention setting
-    let cleanupDays = 30; // default 30 days
-    try {
-      const [settings] = await activeDb.query("SELECT `value` FROM settings WHERE `key` = 'notification_archive_days'");
-      if (settings.length > 0 && settings[0].value) {
-        cleanupDays = parseInt(settings[0].value) || 30;
+    // Non-blocking asynchronous self-cleaning in background
+    setImmediate(async () => {
+      try {
+        let cleanupDays = 30;
+        const [settings] = await activeDb.query("SELECT `value` FROM settings WHERE `key` = 'notification_archive_days'");
+        if (settings.length > 0 && settings[0].value) {
+          cleanupDays = parseInt(settings[0].value) || 30;
+        }
+        await activeDb.query(
+          "DELETE FROM notifications WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)",
+          [cleanupDays]
+        );
+      } catch (err) {
+        // Ignore background cleanup errors
       }
-    } catch (err) {
-      // Settings table may not have the key yet
-    }
-
-    await activeDb.query(
-      "DELETE FROM notifications WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)",
-      [cleanupDays]
-    );
+    });
 
   } catch (error) {
     console.error('[NotificationService] Error creating notification:', error);

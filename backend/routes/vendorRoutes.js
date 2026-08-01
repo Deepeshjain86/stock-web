@@ -13,24 +13,25 @@ import {
   recordSupplierPayment,
   getPaymentReceipt
 } from '../controllers/vendorController.js';
-import { protect, restrictTo } from '../middleware/authMiddleware.js';
+import { protect, checkPermission } from '../middleware/authMiddleware.js';
+import { readOnlyForSuperAdmin } from '../middleware/readOnlyMiddleware.js';
 
 const router = express.Router();
 
 router.use(protect);
 
-router.get('/', getVendors);
-router.get('/payments/:paymentId/receipt', getPaymentReceipt);
-router.get('/:id/profile', getVendorProfile);
-router.get('/:id/ledger', getVendorLedger);
-router.get('/:id/payments', getVendorPayments);
-router.get('/:id/invoices', getVendorInvoices);
-router.get('/:id', getVendorById);
+router.get('/', checkPermission('view_vendors'), getVendors);
+router.get('/payments/:paymentId/receipt', checkPermission('view_vendors'), getPaymentReceipt);
+router.get('/:id/profile', checkPermission('view_vendors'), getVendorProfile);
+router.get('/:id/ledger', checkPermission('view_vendors'), getVendorLedger);
+router.get('/:id/payments', checkPermission('view_vendors'), getVendorPayments);
+router.get('/:id/invoices', checkPermission('view_vendors'), getVendorInvoices);
+router.get('/:id', checkPermission('view_vendors'), getVendorById);
 
-router.post('/', restrictTo('Admin', 'Manager'), createVendor);
-router.post('/:id/payments', restrictTo('Admin', 'Manager'), recordSupplierPayment);
-router.put('/:id', restrictTo('Admin', 'Manager'), updateVendor);
-router.patch('/:id/status', restrictTo('Admin', 'Manager'), toggleVendorStatus);
-router.delete('/:id', restrictTo('Admin'), deleteVendor);
+router.post('/', checkPermission('create_vendors'), readOnlyForSuperAdmin, createVendor);
+router.post('/:id/payments', checkPermission('manage_vendors'), readOnlyForSuperAdmin, recordSupplierPayment);
+router.put('/:id', checkPermission('edit_vendors'), readOnlyForSuperAdmin, updateVendor);
+router.patch('/:id/status', checkPermission('manage_vendors'), readOnlyForSuperAdmin, toggleVendorStatus);
+router.delete('/:id', checkPermission('delete_vendors'), readOnlyForSuperAdmin, deleteVendor);
 
 export default router;

@@ -13,6 +13,8 @@ const user = process.env.DB_USER || 'root';
 const password = process.env.DB_PASSWORD || '';
 const masterDbName = 'kirana_erp_master';
 
+const completedMigrations = new Set();
+
 // 1. Establish static pool connection to Master database
 export const masterPool = mysql.createPool({
   host,
@@ -21,8 +23,10 @@ export const masterPool = mysql.createPool({
   password,
   database: masterDbName,
   waitForConnections: true,
-  connectionLimit: 15,
-  queueLimit: 0
+  connectionLimit: 30,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0
 });
 
 import { runCategorySchemaMigrations } from './schemaMigration.js';
@@ -50,19 +54,24 @@ export const getTenantPool = (dbName) => {
     password,
     database: dbName,
     waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
+    connectionLimit: 25,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0
   });
 
   tenantPools.set(dbName, pool);
 
-  // Asynchronously trigger schema & data migration for categories/sub_categories/brands/products
-  const migrationPromise = runCategorySchemaMigrations(pool)
-    .then(() => runCategoryDataMigration(pool))
-    .catch(err => {
-      console.error(`[Data Migration] Failed to auto-migrate category data for ${dbName}:`, err);
-    });
-  tenantMigrationPromises.set(dbName, migrationPromise);
+  // Asynchronously trigger schema & data migration once per process lifetime
+  if (!completedMigrations.has(dbName)) {
+    completedMigrations.add(dbName);
+    const migrationPromise = runCategorySchemaMigrations(pool)
+      .then(() => runCategoryDataMigration(pool))
+      .catch(err => {
+        console.error(`[Data Migration] Failed to auto-migrate category data for ${dbName}:`, err);
+      });
+    tenantMigrationPromises.set(dbName, migrationPromise);
+  }
 
   return pool;
 };

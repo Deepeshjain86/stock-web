@@ -106,13 +106,53 @@ export const runCategorySchemaMigrations = async (pool) => {
     }
 
     try {
-      const [giCols] = await pool.query('DESCRIBE grn_items');
-      const giColNames = giCols.map(c => c.Field);
-      if (!giColNames.includes('mrp')) {
-        await pool.query('ALTER TABLE grn_items ADD COLUMN mrp DECIMAL(12,2) NULL AFTER batch_number');
+      const [vCols] = await pool.query('DESCRIBE vendors');
+      const vColNames = vCols.map(c => c.Field);
+      const expectedVendorCols = [
+        { name: 'supplier_code', type: 'VARCHAR(50) NULL' },
+        { name: 'company_name', type: 'VARCHAR(150) NULL' },
+        { name: 'contact_person', type: 'VARCHAR(150) NULL' },
+        { name: 'alternate_phone', type: 'VARCHAR(20) NULL' },
+        { name: 'pan', type: 'VARCHAR(10) NULL' },
+        { name: 'city', type: 'VARCHAR(100) NULL' },
+        { name: 'state', type: 'VARCHAR(100) NULL' },
+        { name: 'pincode', type: 'VARCHAR(20) NULL' },
+        { name: 'categories_supplied', type: 'TEXT NULL' },
+        { name: 'payment_terms', type: 'VARCHAR(100) NULL' },
+        { name: 'credit_limit', type: 'DECIMAL(12,2) DEFAULT 0.00' },
+        { name: 'opening_balance', type: 'DECIMAL(12,2) DEFAULT 0.00' },
+        { name: 'opening_balance_type', type: "ENUM('Payable', 'Advance') DEFAULT 'Payable'" },
+        { name: 'notes', type: 'TEXT NULL' },
+        { name: 'bank_name', type: 'VARCHAR(100) NULL' },
+        { name: 'account_number', type: 'VARCHAR(50) NULL' },
+        { name: 'ifsc_code', type: 'VARCHAR(20) NULL' }
+      ];
+      for (const col of expectedVendorCols) {
+        if (!vColNames.includes(col.name)) {
+          await pool.query(`ALTER TABLE vendors ADD COLUMN ${col.name} ${col.type}`);
+        }
       }
     } catch (e) {
-      console.warn('[Schema Migration] grn_items table check:', e.message);
+      console.warn('[Schema Migration] vendors table check:', e.message);
+    }
+
+    try {
+      const [slCols] = await pool.query('DESCRIBE stock_logs');
+      const slColNames = slCols.map(c => c.Field);
+      const expectedStockLogCols = [
+        { name: 'previous_quantity', type: 'INT NULL DEFAULT 0' },
+        { name: 'new_quantity', type: 'INT NULL DEFAULT 0' },
+        { name: 'batch_number', type: 'VARCHAR(100) NULL' },
+        { name: 'mrp', type: 'DECIMAL(12,2) NULL' },
+        { name: 'unit_price', type: 'DECIMAL(12,2) NULL' }
+      ];
+      for (const col of expectedStockLogCols) {
+        if (!slColNames.includes(col.name)) {
+          await pool.query(`ALTER TABLE stock_logs ADD COLUMN ${col.name} ${col.type}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] stock_logs table check:', e.message);
     }
   } catch (err) {
     console.error('[Schema Migration] Category schema migration notice:', err.message);

@@ -105,17 +105,6 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
     if (!formData.name?.trim()) {
       newErrors.name = 'Supplier name is required';
     }
-    if (!formData.phone?.trim()) {
-      newErrors.phone = 'Mobile number is required';
-    }
-
-    if (formData.gstin?.trim() && formData.gstin.trim().length !== 15) {
-      newErrors.gstin = 'GSTIN must be exactly 15 characters long';
-    }
-
-    if (formData.pan?.trim() && formData.pan.trim().length !== 10) {
-      newErrors.pan = 'PAN number must be exactly 10 characters long';
-    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);

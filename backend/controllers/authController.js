@@ -187,60 +187,65 @@ export const login = async (req, res, next) => {
     // Generate Token containing core routing contexts
     const token = generateToken(globalUser.id, globalUser.email, globalUser.role, tenantId, tenantDbName);
 
-    // Save Login Activity Log & Trigger Notifications
-    if (globalUser.role === 'Super Admin') {
-      await logMasterActivity(globalUser.id, 'User Login Success', 'Auth', 'Super Admin logged in.', req.ip);
-      
-      await createNotification({
-        type: 'User Login',
-        title: 'Super Admin Login',
-        message: `Super Admin logged in successfully from IP ${req.ip}.`,
-        priority: 'Low',
-        related_user: globalUser.email,
-        related_module: 'Auth',
-        target_roles: 'Super Admin',
-        isMaster: true
-      });
-    } else {
-      const tenantDb = getTenantPool(tenantDbName);
+    // Asynchronously log login activity & trigger notifications in background for instant login response times
+    setImmediate(async () => {
       try {
-        const localUserId = (localUsers && localUsers[0]) ? localUsers[0].id : null;
-        await tenantDb.query(
-          'INSERT INTO activity_logs (user_id, action, module, details, ip_address) VALUES (?, "User Login Success", "Auth", "Logged in to isolated store console.", ?)',
-          [localUserId, req.ip]
-        );
-      } catch (err) {
-        console.error('Failed to log tenant login activity:', err);
-      }
-
-      await createNotification({
-        type: 'User Login',
-        title: 'Employee Logged In',
-        message: `${userRole} "${displayName}" logged in successfully.`,
-        priority: 'Low',
-        related_user: globalUser.email,
-        related_module: 'Auth',
-        target_roles: 'Admin,Manager'
-      }, tenantDb);
-
-      if (tenant && tenant.subscription_expires_at) {
-        const expiresAt = new Date(tenant.subscription_expires_at);
-        const now = new Date();
-        const diffTime = expiresAt - now;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        if (diffDays > 0 && diffDays <= 3) {
+        if (globalUser.role === 'Super Admin') {
+          await logMasterActivity(globalUser.id, 'User Login Success', 'Auth', 'Super Admin logged in.', req.ip);
           await createNotification({
-            type: 'Subscription',
-            title: 'Subscription Expiry Reminder',
-            message: `Your SaaS subscription will expire in ${diffDays} day(s) on ${expiresAt.toLocaleDateString()}. Please renew soon.`,
-            priority: 'High',
-            related_user: 'System',
-            related_module: 'Billing',
-            target_roles: 'Admin'
+            type: 'User Login',
+            title: 'Super Admin Login',
+            message: `Super Admin logged in successfully from IP ${req.ip}.`,
+            priority: 'Low',
+            related_user: globalUser.email,
+            related_module: 'Auth',
+            target_roles: 'Super Admin',
+            isMaster: true
+          });
+        } else {
+          const tenantDb = getTenantPool(tenantDbName);
+          try {
+            const localUserId = (localUsers && localUsers[0]) ? localUsers[0].id : null;
+            await tenantDb.query(
+              'INSERT INTO activity_logs (user_id, action, module, details, ip_address) VALUES (?, "User Login Success", "Auth", "Logged in to isolated store console.", ?)',
+              [localUserId, req.ip]
+            );
+          } catch (err) {
+            console.error('Failed to log tenant login activity:', err);
+          }
+
+          await createNotification({
+            type: 'User Login',
+            title: 'Employee Logged In',
+            message: `${userRole} "${displayName}" logged in successfully.`,
+            priority: 'Low',
+            related_user: globalUser.email,
+            related_module: 'Auth',
+            target_roles: 'Admin,Manager'
           }, tenantDb);
+
+          if (tenant && tenant.subscription_expires_at) {
+            const expiresAt = new Date(tenant.subscription_expires_at);
+            const now = new Date();
+            const diffTime = expiresAt - now;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (diffDays > 0 && diffDays <= 3) {
+              await createNotification({
+                type: 'Subscription',
+                title: 'Subscription Expiry Reminder',
+                message: `Your SaaS subscription will expire in ${diffDays} day(s) on ${expiresAt.toLocaleDateString()}. Please renew soon.`,
+                priority: 'High',
+                related_user: 'System',
+                related_module: 'Billing',
+                target_roles: 'Admin'
+              }, tenantDb);
+            }
+          }
         }
+      } catch (err) {
+        console.error('Post-login background notification error:', err);
       }
-    }
+    });
 
     // Combined permissions logic for Super Admin
     const superAdminPerms = globalUser.role === 'Super Admin' ? ['manage_tenants', 'manage_subscriptions'] : [];

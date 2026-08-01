@@ -29,6 +29,11 @@ export const errorHandler = (err, req, res, next) => {
         statusCode = 400;
         message = 'Character limit exceeded. One or more fields contain text that is too long for the database column.';
         break;
+      case 'ER_LOCK_DEADLOCK':
+      case 1213:
+        statusCode = 503;
+        message = 'Database lock contention detected. Please resubmit your request.';
+        break;
       default:
         break;
     }

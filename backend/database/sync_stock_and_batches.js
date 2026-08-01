@@ -24,7 +24,7 @@ async function syncStockAndBatches() {
       const conn = await mysql.createConnection({ host, port, user, password, database: dbName });
 
       try {
-        const [products] = await conn.query('SELECT id, expiry_date, purchase_price FROM products');
+        const [products] = await conn.query('SELECT id, expiry_date, purchase_price, selling_price, mrp FROM products');
 
         for (const prod of products) {
           const pId = prod.id;
@@ -58,9 +58,9 @@ async function syncStockAndBatches() {
           } else if (stockTotal > 0) {
             // Create batch in purchase_batches to match stockTotal
             await conn.query(
-              `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, warehouse_id)
-               VALUES (?, 'INIT-SYNC-BATCH', ?, ?, CURRENT_DATE(), ?, ?, 1)`,
-              [pId, stockTotal, stockTotal, prod.expiry_date || null, prod.purchase_price || 0]
+              `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, warehouse_id)
+               VALUES (?, 'INIT-SYNC-BATCH', ?, ?, CURRENT_DATE(), ?, ?, ?, ?, 1)`,
+              [pId, stockTotal, stockTotal, prod.expiry_date || null, prod.purchase_price || 0, prod.mrp || 0, prod.selling_price || 0]
             );
           }
         }

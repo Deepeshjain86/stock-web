@@ -21,14 +21,15 @@ const logoStorage = multer.diskStorage({
 });
 
 const logoFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp|svg\+xml|svg/;
-  const mimetype = allowedTypes.test(file.mimetype);
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const allowedExts = /jpeg|jpg|jfif|pjpeg|pjp|png|webp|avif|gif|svg|bmp|tiff|tif|heic|heif/;
+  const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+  const isMimeImage = file.mimetype && file.mimetype.startsWith('image/');
+  const isExtImage = allowedExts.test(ext);
 
-  if (mimetype || extname) {
+  if (isMimeImage || isExtImage) {
     return cb(null, true);
   }
-  cb(new Error('Invalid file format. Allowed formats: PNG, JPG, JPEG, WEBP, SVG.'));
+  cb(new Error('Invalid image file format. Allowed formats: PNG, JPG, JPEG, JFIF, WEBP, SVG, AVIF.'));
 };
 
 export const logoUploadMulter = multer({
