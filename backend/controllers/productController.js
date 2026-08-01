@@ -347,6 +347,8 @@ export const createProduct = async (req, res, next) => {
       ]
     );
 
+    const productId = result.insertId;
+
     // Newly created products default stock to 0. Stock is added via Purchase Invoices or Stock Adjustments.
     await req.db.query(
       'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE quantity = 0',
