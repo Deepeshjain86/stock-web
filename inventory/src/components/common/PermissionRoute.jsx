@@ -46,11 +46,11 @@ const PermissionRoute = ({ permission, children }) => {
       isAllowed = true;
     }
   } else if (user.role === 'Sales Manager') {
-    if (['view_dashboard', 'view_reports', 'view_sales', 'create_sales', 'delete_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'manage_borrow', 'view_products', 'view_categories', 'view_stock', 'manage_users', 'view_notifications'].includes(permission)) {
+    if (['view_dashboard', 'view_reports', 'view_sales', 'create_sales', 'delete_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'manage_borrow', 'view_vendors', 'view_products', 'view_categories', 'view_stock', 'manage_users', 'view_notifications'].includes(permission)) {
       isAllowed = true;
     }
   } else if (user.role === 'Sales Employee' || (user.role === 'Employee' && user.department === 'Sales')) {
-    if (['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_products', 'view_categories', 'view_stock', 'view_notifications'].includes(permission)) {
+    if (['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_vendors', 'view_products', 'view_categories', 'view_stock', 'view_notifications'].includes(permission)) {
       isAllowed = true;
     }
   } else if (user.role === 'Employee') {

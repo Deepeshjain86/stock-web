@@ -157,7 +157,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     // Sales Manager gets full access only to the Sales module, Sales Dashboard, Borrow, and Customer management
     const salesManagerPerms = [
       'view_dashboard', 'view_sales', 'create_sales', 'delete_sales', 
-      'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users'
+      'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users', 'view_vendors'
     ];
     for (const name of salesManagerPerms) {
       if (permMap[name]) {
@@ -170,7 +170,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
       'view_dashboard', 'view_purchases', 'create_purchases', 'delete_purchases', 
       'view_products', 'create_products', 'edit_products', 'delete_products', 'import_products', 'export_products',
       'view_categories', 'create_categories', 'edit_categories', 'delete_categories',
-      'view_stock', 'adjust_stock', 'transfer_stock', 'destroy_stock', 'manage_vendors', 'view_reports', 'export_reports', 'manage_users'
+      'view_stock', 'adjust_stock', 'transfer_stock', 'destroy_stock', 'view_vendors', 'manage_vendors', 'view_reports', 'export_reports', 'manage_users'
     ];
     for (const name of purchaseManagerPerms) {
       if (permMap[name]) {
@@ -179,7 +179,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     }
 
     // Employee gets checkout billing, products, and inventory access by default
-    const employeePerms = ['view_dashboard', 'view_products', 'create_products', 'edit_products', 'import_products', 'export_products', 'view_categories', 'create_categories', 'edit_categories', 'view_stock', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow'];
+    const employeePerms = ['view_dashboard', 'view_products', 'create_products', 'edit_products', 'import_products', 'export_products', 'view_categories', 'create_categories', 'edit_categories', 'view_stock', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_vendors'];
     for (const name of employeePerms) {
       if (permMap[name]) {
         await tenantConn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [employeeRoleId, permMap[name]]);
@@ -187,7 +187,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     }
 
     // Purchase Employee gets purchase, product import/export, and stock access
-    const purchaseEmployeePerms = ['view_dashboard', 'view_purchases', 'create_purchases', 'view_products', 'create_products', 'edit_products', 'import_products', 'export_products', 'view_categories', 'create_categories', 'edit_categories', 'view_stock', 'view_stock_history', 'adjust_stock', 'destroy_stock', 'view_reports', 'export_reports'];
+    const purchaseEmployeePerms = ['view_dashboard', 'view_purchases', 'create_purchases', 'view_products', 'create_products', 'edit_products', 'import_products', 'export_products', 'view_categories', 'create_categories', 'edit_categories', 'view_stock', 'view_stock_history', 'adjust_stock', 'destroy_stock', 'view_reports', 'export_reports', 'view_vendors'];
     for (const name of purchaseEmployeePerms) {
       if (permMap[name]) {
         await tenantConn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [purchaseEmployeeRoleId, permMap[name]]);
@@ -195,7 +195,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     }
 
     // Sales Employee gets sales billing and customer access
-    const salesEmployeePerms = ['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_products', 'view_categories', 'view_stock'];
+    const salesEmployeePerms = ['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_products', 'view_categories', 'view_stock', 'view_vendors'];
     for (const name of salesEmployeePerms) {
       if (permMap[name]) {
         await tenantConn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [salesEmployeeRoleId, permMap[name]]);

@@ -896,6 +896,7 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification, checkStockAlerts } from '../services/notificationService.js';
 import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
+import { formatDateToYYYYMMDD } from '../utils/dateFormatter.js';
 
 const parseToISODate = (val) => {
   if (!val || val === 'N/A' || val === 'null' || val === 'undefined' || val === '0000-00-00') return null;
@@ -908,7 +909,7 @@ const parseToISODate = (val) => {
     return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
   const d = new Date(str);
-  return (!isNaN(d.getTime()) && d.getFullYear() > 2000) ? d.toISOString().substring(0, 10) : null;
+  return (!isNaN(d.getTime()) && d.getFullYear() > 2000) ? formatDateToYYYYMMDD(d) : null;
 };
 
 // @desc    Get all purchases for tenant
@@ -1106,7 +1107,18 @@ export const createPurchase = async (req, res, next) => {
     );
 
     const purchaseId = result.insertId;
-    const isLinkedToReceipt = !!grn_id;
+    let isLinkedToReceipt = !!grn_id;
+
+    if (!isLinkedToReceipt && purchase_order_id) {
+      const [existingGrn] = await connection.query(
+        'SELECT id FROM grns WHERE purchase_order_id = ? LIMIT 1',
+        [purchase_order_id]
+      );
+      if (existingGrn.length > 0) {
+        isLinkedToReceipt = true;
+        await connection.query('UPDATE purchases SET grn_id = ? WHERE id = ?', [existingGrn[0].id, purchaseId]);
+      }
+    }
 
     // Loop items to save & update stock
     for (const item of items) {
@@ -1417,11 +1429,15 @@ export const getPurchaseOrderById = async (req, res, next) => {
     order.grns = grns;
 
     // Fetch linked Invoices
-    const [invoices] = await req.db.query(
-      'SELECT id, purchase_no, date, total, payment_status FROM purchases WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
-      [id]
-    );
-    order.invoices = invoices;
+    try {
+      const [invoices] = await req.db.query(
+        'SELECT id, purchase_no, date, total, payment_status FROM purchases WHERE purchase_order_id = ? ORDER BY date DESC, created_at DESC',
+        [id]
+      );
+      order.invoices = invoices;
+    } catch (e) {
+      order.invoices = [];
+    }
 
     return res.status(200).json({ success: true, order });
   } catch (error) {
@@ -1614,6 +1630,22 @@ export const createGRN = async (req, res, next) => {
 
     const grnId = grnResult.insertId;
 
+    const [existingPurchases] = await connection.query(
+      'SELECT id FROM purchases WHERE purchase_order_id = ? LIMIT 1',
+      [poId]
+    );
+    let purchaseAlreadyAddedStock = false;
+    if (existingPurchases.length > 0) {
+      const [pBatches] = await connection.query(
+        'SELECT id FROM purchase_batches WHERE purchase_id = ? LIMIT 1',
+        [existingPurchases[0].id]
+      );
+      if (pBatches.length > 0) {
+        purchaseAlreadyAddedStock = true;
+        await connection.query('UPDATE purchases SET grn_id = ? WHERE id = ?', [grnId, existingPurchases[0].id]);
+      }
+    }
+
     // Fetch PO items
     const [poItems] = await connection.query('SELECT id, product_id, quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
 
@@ -1664,7 +1696,14 @@ export const createGRN = async (req, res, next) => {
         );
       }
 
-      if (qtyRec > 0) {
+      if (poItem) {
+        await connection.query(
+          'UPDATE purchase_order_items SET received_quantity = received_quantity + ? WHERE id = ?',
+          [qtyRec, poItem.id]
+        );
+      }
+
+      if (qtyRec > 0 && !purchaseAlreadyAddedStock) {
         const [[prod]] = await connection.query('SELECT mrp, selling_price FROM products WHERE id = ?', [productId]);
         const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
         const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
@@ -1678,14 +1717,6 @@ export const createGRN = async (req, res, next) => {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [productId, item.batch_number || `BATCH-${Date.now()}`, qtyRec, qtyRec, date, formattedExpiry, item.unit_price || 0, itemMrp, itemSellingPrice, vendor_id, warehouse_id, grnId]
         );
-
-        // Update PO item received quantity
-        if (poItem) {
-          await connection.query(
-            'UPDATE purchase_order_items SET received_quantity = received_quantity + ? WHERE id = ?',
-            [qtyRec, poItem.id]
-          );
-        }
 
         // Update Stock levels
         const [existingStock] = await connection.query(

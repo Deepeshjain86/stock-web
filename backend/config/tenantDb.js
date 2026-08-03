@@ -26,7 +26,8 @@ export const masterPool = mysql.createPool({
   connectionLimit: 30,
   queueLimit: 0,
   enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+  keepAliveInitialDelay: 0,
+  dateStrings: true
 });
 
 import { runCategorySchemaMigrations } from './schemaMigration.js';
@@ -57,7 +58,8 @@ export const getTenantPool = (dbName) => {
     connectionLimit: 25,
     queueLimit: 0,
     enableKeepAlive: true,
-    keepAliveInitialDelay: 0
+    keepAliveInitialDelay: 0,
+    dateStrings: true
   });
 
   tenantPools.set(dbName, pool);

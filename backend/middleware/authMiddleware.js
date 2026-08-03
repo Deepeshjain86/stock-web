@@ -252,8 +252,8 @@ export const checkPermission = (permissionName) => {
         });
       }
 
-      // view_notifications and view_dashboard are accessible to all authenticated staff
-      if (permissionName === 'view_notifications' || permissionName === 'view_dashboard') {
+      // view_notifications, view_dashboard, and view_vendors are accessible to all authenticated staff
+      if (permissionName === 'view_notifications' || permissionName === 'view_dashboard' || permissionName === 'view_vendors') {
         return next();
       }
 
@@ -283,7 +283,7 @@ export const checkPermission = (permissionName) => {
           'view_sales', 'create_sales', 'edit_sales', 'delete_sales', 'view_pos', 
           'manage_customers', 'create_customers', 'edit_customers', 'delete_customers', 
           'view_borrow', 'create_borrow', 'manage_borrow', 'delete_borrow',
-          'view_products', 'view_categories', 'view_stock', 'view_stock_history',
+          'view_vendors', 'view_products', 'view_categories', 'view_stock', 'view_stock_history',
           'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications',
           'view_staff', 'manage_users'
         ];
@@ -331,7 +331,7 @@ export const checkPermission = (permissionName) => {
           'view_sales', 'create_sales', 'edit_sales', 'delete_sales', 'view_pos', 
           'manage_customers', 'create_customers', 'edit_customers', 'delete_customers',
           'view_borrow', 'create_borrow', 'manage_borrow', 'delete_borrow',
-          'view_products', 'view_categories', 'view_stock', 'view_stock_history',
+          'view_vendors', 'view_products', 'view_categories', 'view_stock', 'view_stock_history',
           'view_returns', 'create_returns', 'approve_returns', 'delete_returns', 'view_notifications', 'manage_notifications'
         ];
         if (allowedSalesPerms.includes(permissionName)) {

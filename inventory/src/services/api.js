@@ -241,8 +241,15 @@ export const stockDestroyAPI = {
 // Vendors Services
 export const vendorsAPI = {
   getAll: async (params) => {
-    const response = await API.get('/vendors', { params });
-    return response.data;
+    try {
+      const response = await API.get('/vendors', { params });
+      return response.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        return { success: false, vendors: [], count: 0, message: err.response?.data?.message || 'Access restricted' };
+      }
+      throw err;
+    }
   },
   getById: async (id) => {
     const response = await API.get(`/vendors/${id}`);

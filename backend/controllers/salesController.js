@@ -1,6 +1,7 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
 import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
+import { formatDateToYYYYMMDD } from '../utils/dateFormatter.js';
 
 // @desc    Get all sales invoices for authenticated tenant
 // @route   GET /api/sales
@@ -91,7 +92,7 @@ export const getSales = async (req, res, next) => {
       warehouseId: s.warehouse_id,
       warehouseName: s.warehouse_name || 'Main Storage',
       billingUser: s.billing_user_name || 'Counter Operator',
-      date: s.date ? new Date(s.date).toISOString().split('T')[0] : '',
+      date: formatDateToYYYYMMDD(s.date),
       subtotal: Number(s.subtotal || 0),
       discount: Number(s.discount || 0),
       gstAmount: Number(s.gst_amount || 0),
@@ -174,7 +175,7 @@ export const getSaleById = async (req, res, next) => {
       warehouseId: sale.warehouse_id,
       warehouseName: sale.warehouse_name || 'Main Storage',
       billingUser: sale.billing_user_name || 'Counter Operator',
-      date: sale.date ? new Date(sale.date).toISOString().split('T')[0] : '',
+      date: formatDateToYYYYMMDD(sale.date),
       subtotal: Number(sale.subtotal || 0),
       discount: Number(sale.discount || 0),
       gstAmount: Number(sale.gst_amount || 0),
@@ -521,7 +522,7 @@ export const createSale = async (req, res, next) => {
       if (!finalDueDate) {
         const d = new Date(date);
         d.setDate(d.getDate() + 15);
-        finalDueDate = d.toISOString().slice(0, 10);
+        finalDueDate = formatDateToYYYYMMDD(d);
       }
 
       let txStatus = 'Pending';

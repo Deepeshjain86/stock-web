@@ -258,6 +258,8 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
 CREATE TABLE IF NOT EXISTS purchases (
   id INT AUTO_INCREMENT PRIMARY KEY,
   purchase_no VARCHAR(50) NOT NULL UNIQUE,
+  purchase_order_id INT NULL,
+  grn_id INT NULL,
   vendor_id INT NOT NULL,
   warehouse_id INT NOT NULL,
   date DATE NOT NULL,
@@ -356,6 +358,9 @@ CREATE TABLE IF NOT EXISTS sales (
   payment_method VARCHAR(50) DEFAULT 'Cash',
   amount_paid DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   due_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  balance_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  payment_date DATE NULL,
+  notes TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (customer_id) REFERENCES customers(id),
@@ -381,6 +386,7 @@ CREATE TABLE IF NOT EXISTS sale_items (
 -- 16b. Sale Payments Table (Split Payments / Multiple Modes)
 CREATE TABLE IF NOT EXISTS sale_payments (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id INT NULL,
   sale_id INT NOT NULL,
   payment_method VARCHAR(50) NOT NULL,
   amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,

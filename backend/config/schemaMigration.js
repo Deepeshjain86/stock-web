@@ -52,6 +52,16 @@ export const runCategorySchemaMigrations = async (pool) => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
+    try {
+      const [spCols] = await pool.query('DESCRIBE sale_payments');
+      const spColNames = spCols.map(c => c.Field);
+      if (!spColNames.includes('tenant_id')) {
+        await pool.query('ALTER TABLE sale_payments ADD COLUMN tenant_id INT NULL AFTER id');
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] sale_payments table check:', e.message);
+    }
+
     // 4b. Per-user notification state for non-admin staff.
     // Admin continues to use notifications.is_read/delete directly.
     await pool.query(`
@@ -153,6 +163,38 @@ export const runCategorySchemaMigrations = async (pool) => {
       }
     } catch (e) {
       console.warn('[Schema Migration] stock_logs table check:', e.message);
+    }
+
+    try {
+      const [purCols] = await pool.query('DESCRIBE purchases');
+      const purColNames = purCols.map(c => c.Field);
+      if (!purColNames.includes('purchase_order_id')) {
+        await pool.query('ALTER TABLE purchases ADD COLUMN purchase_order_id INT NULL AFTER purchase_no');
+      }
+      if (!purColNames.includes('grn_id')) {
+        await pool.query('ALTER TABLE purchases ADD COLUMN grn_id INT NULL AFTER purchase_order_id');
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] purchases table check:', e.message);
+    }
+
+    try {
+      const [sCols] = await pool.query('DESCRIBE sales');
+      const sColNames = sCols.map(c => c.Field);
+      const expectedSalesCols = [
+        { name: 'amount_paid', type: 'DECIMAL(12,2) NOT NULL DEFAULT 0.00' },
+        { name: 'due_amount', type: 'DECIMAL(12,2) NOT NULL DEFAULT 0.00' },
+        { name: 'balance_amount', type: 'DECIMAL(12,2) NOT NULL DEFAULT 0.00' },
+        { name: 'payment_date', type: 'DATE NULL' },
+        { name: 'notes', type: 'TEXT NULL' }
+      ];
+      for (const col of expectedSalesCols) {
+        if (!sColNames.includes(col.name)) {
+          await pool.query(`ALTER TABLE sales ADD COLUMN ${col.name} ${col.type}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] sales table check:', e.message);
     }
   } catch (err) {
     console.error('[Schema Migration] Category schema migration notice:', err.message);

@@ -1,5 +1,6 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification, checkStockAlerts } from '../services/notificationService.js';
+import { formatDateToYYYYMMDD } from '../utils/dateFormatter.js';
 
 // Helper to safely format dates for MySQL DATE columns (returns null if invalid or 'N/A')
 const formatMySQLDate = (val) => {
@@ -18,7 +19,7 @@ const formatMySQLDate = (val) => {
 
   const d = new Date(str);
   if (!isNaN(d.getTime())) {
-    return d.toISOString().split('T')[0];
+    return formatDateToYYYYMMDD(d);
   }
 
   return null;

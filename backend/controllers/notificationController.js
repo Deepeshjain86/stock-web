@@ -263,7 +263,7 @@ export const markAsRead = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Notification not found or access denied' });
     }
 
-    await db.query('UPDATE notifications SET is_read = TRUE, updated_at = NOW() WHERE id = ?', [id]);
+    await db.query('UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE id = ?', [id]);
     return res.status(200).json({ success: true, message: 'Notification marked as read' });
   } catch (error) {
     next(error);
@@ -290,7 +290,7 @@ export const markAsUnread = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Notification not found or access denied' });
     }
 
-    await db.query('UPDATE notifications SET is_read = FALSE, updated_at = NOW() WHERE id = ?', [id]);
+    await db.query('UPDATE notifications SET is_read = FALSE, read_at = NULL WHERE id = ?', [id]);
     return res.status(200).json({ success: true, message: 'Notification marked as unread' });
   } catch (error) {
     next(error);
@@ -308,7 +308,7 @@ export const markAllAsRead = async (req, res, next) => {
     const { conditions, queryParams } = await buildRbacConditions(req, db);
     conditions.push('is_read = FALSE');
 
-    const query = 'UPDATE notifications SET is_read = TRUE, updated_at = NOW() WHERE ' + conditions.join(' AND ');
+    const query = 'UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE ' + conditions.join(' AND ');
 
     await db.query(query, queryParams);
     return res.status(200).json({ success: true, message: 'All relevant notifications marked as read' });
