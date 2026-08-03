@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import {
   XMarkIcon,
@@ -144,14 +145,14 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
 
         const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
         if (!jsonRows || jsonRows.length < 2) {
-          alert('Uploaded file is empty or has no data rows below the header.');
+          toast.error('Uploaded file is empty or has no data rows below the header.');
           return;
         }
 
         // Header row (row 0)
         const headers = jsonRows[0].map(h => h ? h.toString().trim() : '').filter(Boolean);
         if (headers.length === 0) {
-          alert('Could not detect column headers in the uploaded file.');
+          toast.error('Could not detect column headers in the uploaded file.');
           return;
         }
 
@@ -211,7 +212,7 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
         validateColumnMapping(autoMap);
         setStep(2);
       } catch (err) {
-        alert('Failed to read Excel/CSV file: ' + err.message);
+        toast.error('Failed to read Excel/CSV file: ' + err.message);
       }
     };
 
@@ -244,10 +245,15 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
   // Step 2 -> Step 3: Run Row-Level Validation
   const handleProceedToValidation = () => {
     if (!validateColumnMapping(columnMap)) {
-      alert(`Cannot proceed! Mandatory column(s) missing: ${mappingErrors.join(', ')}`);
+      toast.error(`Cannot proceed! Mandatory column(s) missing: ${mappingErrors.join(', ')}`);
       return;
     }
+    
+    runRowValidation();
+    setStep(3);
+  };
 
+  const runRowValidation = () => {
     // Process each row
     const seenBarcodes = new Set();
     const seenSkus = new Set();
@@ -347,7 +353,7 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
   const handleConfirmImport = async () => {
     const validRecordsOnly = validatedRows.filter(r => r.isValid);
     if (validRecordsOnly.length === 0) {
-      alert('No valid records to import! Please fix row errors and try again.');
+      toast.error('No valid records to import! Please fix row errors and try again.');
       return;
     }
 
@@ -380,9 +386,10 @@ export default function ProductImportWizardModal({ isOpen, onClose, onSuccess })
       });
       setServerFailedRecords(allFailures);
       setStep(4);
+      toast.success(`Bulk import completed (${serverSummary.successCount} products imported)`);
       if (onSuccess) onSuccess();
     } catch (err) {
-      alert('Bulk Import Failed: ' + (err.response?.data?.message || err.message));
+      toast.error('Bulk Import Failed: ' + (err.response?.data?.message || err.message));
     } finally {
       setIsImporting(false);
     }

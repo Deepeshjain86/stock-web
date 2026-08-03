@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { 
   PlusIcon, 
   PencilSquareIcon, 
@@ -216,7 +217,7 @@ const CategoryList = () => {
       }
       loadData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to toggle status');
+      toast.error(err.response?.data?.message || 'Failed to toggle status');
     }
   };
 

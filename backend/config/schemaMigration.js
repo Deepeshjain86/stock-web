@@ -179,6 +179,16 @@ export const runCategorySchemaMigrations = async (pool) => {
     }
 
     try {
+      const [prodCols] = await pool.query('DESCRIBE products');
+      const prodColNames = prodCols.map(c => c.Field);
+      if (!prodColNames.includes('measurement_value')) {
+        await pool.query('ALTER TABLE products ADD COLUMN measurement_value VARCHAR(100) NULL AFTER unit');
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] products table check:', e.message);
+    }
+
+    try {
       const [sCols] = await pool.query('DESCRIBE sales');
       const sColNames = sCols.map(c => c.Field);
       const expectedSalesCols = [
@@ -195,6 +205,18 @@ export const runCategorySchemaMigrations = async (pool) => {
       }
     } catch (e) {
       console.warn('[Schema Migration] sales table check:', e.message);
+    }
+
+    // ── ALTER QUANTITY COLUMNS TO DECIMAL(12,3) FOR LOOSE / WEIGHT / VOLUME / FRACTIONAL SELLING ──
+    try {
+      await pool.query('ALTER TABLE stock MODIFY COLUMN quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000');
+      await pool.query('ALTER TABLE sale_items MODIFY COLUMN quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000');
+      await pool.query('ALTER TABLE purchase_items MODIFY COLUMN quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000');
+      await pool.query('ALTER TABLE purchase_batches MODIFY COLUMN purchase_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000, MODIFY COLUMN remaining_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000');
+      await pool.query('ALTER TABLE stock_logs MODIFY COLUMN quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000, MODIFY COLUMN previous_quantity DECIMAL(12,3) NULL DEFAULT 0.000, MODIFY COLUMN new_quantity DECIMAL(12,3) NULL DEFAULT 0.000');
+      await pool.query('ALTER TABLE grn_items MODIFY COLUMN quantity_received DECIMAL(12,3) NOT NULL DEFAULT 0.000, MODIFY COLUMN quantity_damaged DECIMAL(12,3) NOT NULL DEFAULT 0.000, MODIFY COLUMN quantity_rejected DECIMAL(12,3) NOT NULL DEFAULT 0.000');
+    } catch (e) {
+      console.warn('[Schema Migration] DECIMAL quantity column modify check:', e.message);
     }
   } catch (err) {
     console.error('[Schema Migration] Category schema migration notice:', err.message);

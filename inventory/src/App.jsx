@@ -77,9 +77,39 @@ const GlobalToast = () => {
   );
 };
 
+import { Toaster } from 'react-hot-toast';
+
 function App() {
   return (
     <BrowserRouter>
+      <Toaster 
+        position="top-right" 
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: '#0f172a',
+            color: '#f8fafc',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            fontSize: '13px',
+            fontWeight: '600',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+            padding: '12px 18px',
+          },
+          success: {
+            iconTheme: {
+              primary: '#10b981',
+              secondary: '#ffffff',
+            },
+          },
+          error: {
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#ffffff',
+            },
+          },
+        }}
+      />
       <GlobalToast />
       <Routes>
         {/* Public Home & Auth Routes */}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { 
   DocumentArrowDownIcon, 
   ArrowPathIcon,
@@ -336,13 +337,13 @@ const Reports = () => {
       setLoading(true);
       const res = await salesAPI.delete(row.id);
       if (res.success) {
-        alert(`Sales invoice "${row.invoice_no}" voided successfully and stock restored.`);
+        toast.success(`Sales invoice "${row.invoice_no}" voided successfully and stock restored.`);
         fetchReportData();
       } else {
-        alert(res.message || 'Failed to void sales invoice.');
+        toast.error(res.message || 'Failed to void sales invoice.');
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Error voiding sales invoice.');
+      toast.error(err.response?.data?.message || 'Error voiding sales invoice.');
     } finally {
       setLoading(false);
     }
@@ -354,13 +355,13 @@ const Reports = () => {
       setLoading(true);
       const res = await purchasesAPI.delete(row.id);
       if (res.success) {
-        alert(`Purchase invoice "${row.purchase_no}" voided successfully.`);
+        toast.success(`Purchase invoice "${row.purchase_no}" voided successfully.`);
         fetchReportData();
       } else {
-        alert(res.message || 'Failed to void purchase invoice.');
+        toast.error(res.message || 'Failed to void purchase invoice.');
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Error voiding purchase invoice.');
+      toast.error(err.response?.data?.message || 'Error voiding purchase invoice.');
     } finally {
       setLoading(false);
     }
@@ -379,13 +380,13 @@ const Reports = () => {
         reason: 'Voided from Inventory Valuation Report'
       });
       if (res.success) {
-        alert(`Inventory entry for "${row.name}" voided successfully (Stock set to 0).`);
+        toast.success(`Inventory entry for "${row.name}" voided successfully (Stock set to 0).`);
         fetchReportData();
       } else {
-        alert(res.message || 'Failed to void inventory entry.');
+        toast.error(res.message || 'Failed to void inventory entry.');
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Error voiding inventory entry.');
+      toast.error(err.response?.data?.message || 'Error voiding inventory entry.');
     } finally {
       setLoading(false);
     }

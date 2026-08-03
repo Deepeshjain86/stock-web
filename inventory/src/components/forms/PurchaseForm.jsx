@@ -411,8 +411,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
                 {/* Qty */}
                 <div className="md:col-span-2">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Quantity</label>
-                  <input type="number" min="1" value={quantity}
-                    onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  <input type="number" min="0.001" step="0.001" value={quantity}
+                    onChange={(e) => setQuantity(e.target.value === '' ? '' : Math.max(0.001, parseFloat(e.target.value) || 0))}
                     className="w-full px-3 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 font-mono text-center font-bold text-slate-700" />
                 </div>
 

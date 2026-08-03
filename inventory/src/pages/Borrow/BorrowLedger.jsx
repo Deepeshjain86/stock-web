@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   BookOpenIcon, 
@@ -111,7 +112,7 @@ const BorrowLedger = () => {
   const handleTxSubmit = async (e) => {
     e.preventDefault();
     if (!txForm.amount || Number(txForm.amount) <= 0) {
-      alert('Please enter a valid amount');
+      toast.error('Please enter a valid amount');
       return;
     }
 
@@ -125,12 +126,12 @@ const BorrowLedger = () => {
       const res = await API.post('/borrow/payback', payload);
 
       if (res.data?.success) {
-        alert('Payback recorded successfully');
+        toast.success('Payback recorded successfully');
         setShowTxModal(false);
         loadSummary();
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to record payback');
+      toast.error(err.response?.data?.message || 'Failed to record payback');
     }
   };
 

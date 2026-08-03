@@ -31,6 +31,7 @@ import brandRoutes from './routes/brandRoutes.js';
 import { errorHandler } from './middleware/errorMiddleware.js';
 import { initializeTenantPools } from './config/tenantDb.js';
 import { startCleanupScheduler } from './services/cleanupService.js';
+import { initBackupScheduler } from './services/backupService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,4 +105,5 @@ app.listen(PORT, () => {
   console.log(`====================================================`);
   initializeTenantPools();
   startCleanupScheduler();
+  initBackupScheduler();
 });

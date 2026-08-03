@@ -272,7 +272,7 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
               {/* Unit */}
               <div>
                 <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
-                  Unit <span className="text-rose-500">*</span>
+                  Unit (Measurement Parameter) <span className="text-rose-500">*</span>
                 </label>
                 <select
                   name="unit"
@@ -283,17 +283,35 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                   <option value="Packet">Packet</option>
                   <option value="Bottle">Bottle</option>
                   <option value="Box">Box</option>
-                  <option value="Kg">Kg</option>
-                  <option value="Grams">Grams</option>
-                  <option value="Litre">Litre</option>
-                  <option value="Ml">Ml</option>
+                  <option value="Kg">Kg (Kilogram)</option>
+                  <option value="Grams">Grams (g)</option>
+                  <option value="Litre">Litre (L)</option>
+                  <option value="Ml">Ml (Millilitre)</option>
                   <option value="Sachet">Sachet</option>
-                  <option value="Piece">Piece</option>
+                  <option value="Piece">Piece / Pcs</option>
+                  <option value="Carton">Carton</option>
+                  <option value="Dozen">Dozen</option>
+                  <option value="Meter">Meter</option>
                 </select>
               </div>
 
+              {/* Measurement Value / Net Content Size */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
+                  Measurement Value / Net Size
+                </label>
+                <input
+                  type="text"
+                  name="measurement_value"
+                  value={formData.measurement_value || ''}
+                  onChange={handleChange}
+                  placeholder="e.g. 500g, 1.5 L, 250ml, 5 Kg"
+                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-semibold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none"
+                />
+              </div>
+
               {/* Product Image File */}
-              <div className="sm:col-span-1 md:col-span-2">
+              <div className="sm:col-span-1 md:col-span-1">
                 <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">Product Image File</label>
                 <input
                   type="file"
@@ -302,7 +320,7 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                     const file = e.target.files[0];
                     if (file) {
                       if (file.size > 25 * 1024 * 1024) {
-                        alert('Selected image exceeds 25MB limit.');
+                        toast.error('Selected image exceeds 25MB limit.');
                         e.target.value = '';
                         return;
                       }

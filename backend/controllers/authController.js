@@ -62,8 +62,31 @@ export const login = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact your administrator.' });
     }
 
-    // Verify Password Hash strictly
-    const isMatch = await bcrypt.compare(inputPass, globalUser.password);
+    // Verify Password Hash strictly with Self-Healing Fallback
+    let isMatch = await bcrypt.compare(inputPass, globalUser.password);
+
+    if (!isMatch && globalUser.role !== 'Super Admin' && globalUser.tenant_id) {
+      try {
+        const [tenants] = await masterPool.query('SELECT database_name FROM tenants WHERE id = ?', [globalUser.tenant_id]);
+        if (tenants.length > 0) {
+          const tenantDb = getTenantPool(tenants[0].database_name);
+          const [tUsers] = await tenantDb.query(
+            'SELECT password FROM users WHERE LOWER(email) = LOWER(?) OR UPPER(login_id) = UPPER(?)', 
+            [globalUser.email, globalUser.login_id || globalUser.email]
+          );
+          if (tUsers.length > 0) {
+            const isTenantMatch = await bcrypt.compare(inputPass, tUsers[0].password);
+            if (isTenantMatch) {
+              isMatch = true;
+              // Auto-heal masterPool hash so future logins are instant
+              await masterPool.query('UPDATE users SET password = ? WHERE id = ?', [tUsers[0].password, globalUser.id]);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Self-Healing Auth] Tenant DB fallback check:', err.message);
+      }
+    }
 
     if (!isMatch) {
       if (globalUser.role === 'Super Admin') {

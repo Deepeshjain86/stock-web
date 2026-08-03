@@ -325,6 +325,14 @@ export const updateUser = async (req, res, next) => {
       [name, email || null, contact ?? existing[0].contact ?? null, role_id, status, department || currentDept, id]
     );
 
+    // Update password if provided in update payload
+    if (req.body.password && String(req.body.password).trim().length > 0) {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(String(req.body.password).trim(), salt);
+      await connection.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id]);
+      await masterPool.query('UPDATE users SET password = ? WHERE email = ? AND tenant_id = ?', [hashedPassword, email || currentEmail, req.tenantId]);
+    }
+
     // Update email in Master DB matching currentEmail
     if (email && email !== currentEmail) {
       await masterPool.query(

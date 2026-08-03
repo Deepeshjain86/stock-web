@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import { 
   PlusIcon, 
   MagnifyingGlassIcon, 
@@ -179,12 +180,12 @@ const CustomerList = () => {
       if (selectedCustomer) {
         const res = await customersAPI.update(selectedCustomer.id, form);
         if (res.success) {
-          alert('Customer profile updated successfully');
+          toast.success('Customer profile updated successfully');
         }
       } else {
         const res = await customersAPI.create(form);
         if (res.success) {
-          alert('New customer registered successfully');
+          toast.success('New customer registered successfully');
         }
       }
       setShowFormModal(false);
@@ -194,7 +195,7 @@ const CustomerList = () => {
         loadProfileDetails(selectedCustomer.id);
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Error processing request');
+      toast.error(err.response?.data?.message || 'Error processing request');
     }
   };
 
@@ -207,13 +208,13 @@ const CustomerList = () => {
     try {
       const res = await customersAPI.delete(deleteConfirm.id);
       if (res.success) {
-        alert('Customer profile deleted successfully');
+        toast.success('Customer profile deleted successfully');
         fetchCustomers();
         fetchKPIs();
         setViewMode('list');
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to remove customer profile');
+      toast.error(err.response?.data?.message || 'Failed to remove customer profile');
     } finally {
       setDeleteConfirm({ open: false, id: null, name: '' });
     }
@@ -222,7 +223,7 @@ const CustomerList = () => {
   const toggleStatus = async (customer) => {
     if (!customer || isReadOnly) return;
     if (customer.id === 1) {
-      alert('Cannot modify system default Walk-in Customer profile');
+      toast.error('Cannot modify system default Walk-in Customer profile');
       return;
     }
     const newStatus = customer.status === 'Active' ? 'Inactive' : 'Active';
@@ -236,6 +237,7 @@ const CustomerList = () => {
         payment_mode: customer.payment_mode
       });
       if (res.success) {
+        toast.success(`Customer status updated to ${newStatus}`);
         fetchCustomers();
         fetchKPIs();
         if (viewMode === 'profile' && profileData && profileData.id === customer.id) {
@@ -243,7 +245,7 @@ const CustomerList = () => {
         }
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to toggle customer status');
+      toast.error(err.response?.data?.message || 'Failed to toggle customer status');
     }
   };
 
@@ -269,13 +271,13 @@ const CustomerList = () => {
       };
       const res = await API.post('/borrow/transactions', payload);
       if (res.data?.success) {
-        alert('Credit Udhaar transaction recorded successfully');
+        toast.success('Credit Udhaar transaction recorded successfully');
         setShowNewBorrowModal(false);
         loadProfileDetails(profileData.id);
         fetchKPIs();
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to save transaction');
+      toast.error(err.response?.data?.message || 'Failed to save transaction');
     }
   };
 
@@ -302,13 +304,13 @@ const CustomerList = () => {
       };
       const res = await API.post('/borrow/payback', payload);
       if (res.data?.success) {
-        alert('Payment received and credited successfully');
+        toast.success('Payment received and credited successfully');
         setShowPaybackModal(false);
         loadProfileDetails(profileData.id);
         fetchKPIs();
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Payback entry failed');
+      toast.error(err.response?.data?.message || 'Payback entry failed');
     }
   };
 

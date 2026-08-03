@@ -6,7 +6,9 @@ import {
   updateStore, 
   toggleStoreStatus,
   deleteStore,
-  handleSubscriptionAction 
+  handleSubscriptionAction,
+  getBackups,
+  triggerManualBackup
 } from '../controllers/superAdminController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
@@ -22,5 +24,9 @@ router.put('/stores/:id', updateStore);
 router.patch('/stores/:id/status', toggleStoreStatus);
 router.delete('/stores/:id', deleteStore);
 router.post('/stores/:id/subscription-action', handleSubscriptionAction);
+
+// Backup Routes
+router.get('/backups', getBackups);
+router.post('/backups/trigger', triggerManualBackup);
 
 export default router;

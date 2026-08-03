@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
+import { runCategorySchemaMigrations } from '../config/schemaMigration.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,6 +67,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     const schemaPath = path.join(__dirname, '../database/schema_tenant.sql');
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     await tenantConn.query(schemaSql);
+    await runCategorySchemaMigrations(tenantConn);
 
     // 4. Seed Local Store Specific Roles
     const [adminRoleResult] = await tenantConn.query(

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PlusIcon,
@@ -306,10 +307,10 @@ const ProductList = () => {
       data.append('description', product.description || '');
 
       await productsAPI.create(data);
-      alert('Product duplicated successfully');
+      toast.success('Product duplicated successfully');
       fetchProductsAndCategories();
     } catch (err) {
-      alert(err.response?.data?.message || 'Duplicate failed');
+      toast.error(err.response?.data?.message || 'Duplicate failed');
     } finally {
       setActiveActionsMenu(null);
     }
@@ -324,11 +325,11 @@ const ProductList = () => {
     try {
       const res = await productsAPI.delete(deleteConfirm.id);
       if (res.success) {
-        alert('Product deleted successfully');
+        toast.success('Product deleted successfully');
         fetchProductsAndCategories();
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Deletion failed. Historical sale/purchase records lock.');
+      toast.error(err.response?.data?.message || 'Deletion failed. Historical sale/purchase records lock.');
     } finally {
       setDeleteConfirm({ open: false, id: null });
     }
@@ -346,7 +347,7 @@ const ProductList = () => {
       });
       fetchProductsAndCategories();
     } catch (err) {
-      alert(err.response?.data?.message || 'Quick Stock In failed');
+      toast.error(err.response?.data?.message || 'Quick Stock In failed');
     } finally {
       setActiveActionsMenu(null);
     }
@@ -364,7 +365,7 @@ const ProductList = () => {
       });
       fetchProductsAndCategories();
     } catch (err) {
-      alert(err.response?.data?.message || 'Quick Stock Out failed');
+      toast.error(err.response?.data?.message || 'Quick Stock Out failed');
     } finally {
       setActiveActionsMenu(null);
     }
@@ -405,14 +406,14 @@ const ProductList = () => {
 
       if (selectedProduct) {
         await productsAPI.update(selectedProduct.id, data);
-        alert('Product details updated successfully');
+        toast.success('Product details updated successfully');
       } else {
         await productsAPI.create(data);
-        alert('New product added successfully');
+        toast.success('New product added successfully');
       }
       fetchProductsAndCategories();
     } catch (error) {
-      alert(error.response?.data?.message || 'Save record failed');
+      toast.error(error.response?.data?.message || 'Save record failed');
     } finally {
       setShowModal(false);
       setSelectedProduct(null);
@@ -584,11 +585,11 @@ const ProductList = () => {
       for (const id of selectedRowIds) {
         await productsAPI.delete(id);
       }
-      alert(`Successfully deleted ${selectedRowIds.length} products.`);
+      toast.success(`Successfully deleted ${selectedRowIds.length} products.`);
       setSelectedRowIds([]);
       fetchProductsAndCategories();
     } catch (err) {
-      alert('Error deleting one or more products: ' + (err.response?.data?.message || err.message));
+      toast.error('Error deleting one or more products: ' + (err.response?.data?.message || err.message));
       fetchProductsAndCategories();
     }
   };
@@ -935,7 +936,10 @@ const ProductList = () => {
                           )}
                         </td>
                         <td className="py-3 px-4 font-bold text-slate-800 group-hover:text-indigo-650 transition-colors">
-                          {p.name}
+                          <div>{p.name}</div>
+                          <div className="text-[10px] font-semibold text-slate-400">
+                            {p.measurement_value ? `${p.unit} (${p.measurement_value})` : p.unit}
+                          </div>
                         </td>
                         <td className="py-3 px-4 font-mono text-slate-500 text-[11px] tracking-tight">{p.barcode || 'N/A'}</td>
                         <td className="py-3 px-4 text-slate-600 font-semibold">{p.category}</td>

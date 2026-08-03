@@ -158,56 +158,74 @@ const buildRbacConditions = async (req, db) => {
 // @desc    Get all notifications (filtered by role, module, priority, search, page)
 // @route   GET /api/notifications
 // @access  Private
+// @desc    Get all notifications (filtered by role, module, priority, search, page)
+// @route   GET /api/notifications
+// @access  Private
 export const getNotifications = async (req, res, next) => {
   try {
     const { unreadOnly, module, priority, search, page = 1, limit = 50 } = req.query;
     
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id || 0;
 
     const { conditions, queryParams } = await buildRbacConditions(req, db);
 
     // 1. Unread filter
     if (unreadOnly === 'true' || unreadOnly === true) {
-      conditions.push('is_read = FALSE');
+      conditions.push('COALESCE(nus.is_read, n.is_read) = FALSE');
     }
 
     // 2. Module filter
     if (module && module !== 'all') {
-      conditions.push('(module = ? OR related_module = ?)');
+      conditions.push('(n.module = ? OR n.related_module = ?)');
       queryParams.push(module, module);
     }
 
     // 3. Priority filter
     if (priority && priority !== 'all') {
-      conditions.push('priority = ?');
+      conditions.push('n.priority = ?');
       queryParams.push(priority);
     }
 
     // 4. Search filter
     if (search && search.trim() !== '') {
-      conditions.push('(title LIKE ? OR message LIKE ? OR actor_name LIKE ? OR action LIKE ?)');
+      conditions.push('(n.title LIKE ? OR n.message LIKE ? OR n.actor_name LIKE ? OR n.action LIKE ?)');
       queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
-    let query = 'SELECT * FROM notifications';
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    // Always exclude deleted notifications for THIS specific user
+    conditions.push('COALESCE(nus.is_deleted, FALSE) = FALSE');
+
+    // Build SQL with JOIN on per-user notification_user_states
+    const prefixedConditions = conditions.map(c => {
+      if (c.startsWith('COALESCE(') || c.startsWith('n.')) return c;
+      return c.replace(/\b(module|related_module|type|priority|title|message|actor_name|actor_id|action|target_roles|created_at|id)\b/g, 'n.$1');
+    });
+
+    const whereClause = prefixedConditions.length > 0 ? ' WHERE ' + prefixedConditions.join(' AND ') : '';
+    const joinClause = ' FROM notifications n LEFT JOIN notification_user_states nus ON n.id = nus.notification_id AND nus.user_id = ? ';
+    const fullParams = [userId, ...queryParams];
 
     // Total count for pagination
-    const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as count');
-    const [countResult] = await db.query(countQuery, queryParams);
+    const countQuery = `SELECT COUNT(*) as count ${joinClause} ${whereClause}`;
+    const [countResult] = await db.query(countQuery, fullParams);
     const total = countResult[0]?.count || 0;
 
     // Ordering & Pagination
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    const selectQuery = `
+      SELECT n.*, 
+             COALESCE(nus.is_read, n.is_read) as is_read,
+             COALESCE(nus.is_deleted, FALSE) as is_deleted
+      ${joinClause} ${whereClause}
+      ORDER BY n.created_at DESC LIMIT ? OFFSET ?
+    `;
     const parsedLimit = parseInt(limit) || 50;
     const parsedPage = parseInt(page) || 1;
     const offset = (parsedPage - 1) * parsedLimit;
-    const paginationParams = [...queryParams, parsedLimit, offset];
+    const paginationParams = [...fullParams, parsedLimit, offset];
 
-    const [notifications] = await db.query(query, paginationParams);
+    const [notifications] = await db.query(selectQuery, paginationParams);
 
     return res.status(200).json({
       success: true,
@@ -228,13 +246,22 @@ export const getUnreadCount = async (req, res, next) => {
   try {
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id || 0;
 
     const { conditions, queryParams } = await buildRbacConditions(req, db);
-    conditions.push('is_read = FALSE');
+    conditions.push('COALESCE(nus.is_read, n.is_read) = FALSE');
+    conditions.push('COALESCE(nus.is_deleted, FALSE) = FALSE');
 
-    let query = 'SELECT COUNT(*) as unreadCount FROM notifications WHERE ' + conditions.join(' AND ');
+    const prefixedConditions = conditions.map(c => {
+      if (c.startsWith('COALESCE(') || c.startsWith('n.')) return c;
+      return c.replace(/\b(module|related_module|type|priority|title|message|actor_name|actor_id|action|target_roles|created_at|id)\b/g, 'n.$1');
+    });
 
-    const [result] = await db.query(query, queryParams);
+    const whereClause = ' WHERE ' + prefixedConditions.join(' AND ');
+    const joinClause = ' FROM notifications n LEFT JOIN notification_user_states nus ON n.id = nus.notification_id AND nus.user_id = ? ';
+    const query = `SELECT COUNT(*) as unreadCount ${joinClause} ${whereClause}`;
+
+    const [result] = await db.query(query, [userId, ...queryParams]);
     const unreadCount = result[0]?.unreadCount || 0;
 
     return res.status(200).json({ success: true, unreadCount });
@@ -251,19 +278,14 @@ export const markAsRead = async (req, res, next) => {
     const { id } = req.params;
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id;
 
-    const { conditions, queryParams } = await buildRbacConditions(req, db);
-    conditions.push('id = ?');
-    queryParams.push(id);
+    await db.query(`
+      INSERT INTO notification_user_states (notification_id, user_id, is_read, read_at)
+      VALUES (?, ?, TRUE, NOW())
+      ON DUPLICATE KEY UPDATE is_read = TRUE, read_at = NOW()
+    `, [id, userId]);
 
-    const checkQuery = 'SELECT id FROM notifications WHERE ' + conditions.join(' AND ');
-    const [existing] = await db.query(checkQuery, queryParams);
-
-    if (existing.length === 0) {
-      return res.status(404).json({ success: false, message: 'Notification not found or access denied' });
-    }
-
-    await db.query('UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE id = ?', [id]);
     return res.status(200).json({ success: true, message: 'Notification marked as read' });
   } catch (error) {
     next(error);
@@ -278,19 +300,14 @@ export const markAsUnread = async (req, res, next) => {
     const { id } = req.params;
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id;
 
-    const { conditions, queryParams } = await buildRbacConditions(req, db);
-    conditions.push('id = ?');
-    queryParams.push(id);
+    await db.query(`
+      INSERT INTO notification_user_states (notification_id, user_id, is_read, read_at)
+      VALUES (?, ?, FALSE, NULL)
+      ON DUPLICATE KEY UPDATE is_read = FALSE, read_at = NULL
+    `, [id, userId]);
 
-    const checkQuery = 'SELECT id FROM notifications WHERE ' + conditions.join(' AND ');
-    const [existing] = await db.query(checkQuery, queryParams);
-
-    if (existing.length === 0) {
-      return res.status(404).json({ success: false, message: 'Notification not found or access denied' });
-    }
-
-    await db.query('UPDATE notifications SET is_read = FALSE, read_at = NULL WHERE id = ?', [id]);
     return res.status(200).json({ success: true, message: 'Notification marked as unread' });
   } catch (error) {
     next(error);
@@ -304,20 +321,37 @@ export const markAllAsRead = async (req, res, next) => {
   try {
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id;
 
     const { conditions, queryParams } = await buildRbacConditions(req, db);
-    conditions.push('is_read = FALSE');
+    conditions.push('COALESCE(nus.is_deleted, FALSE) = FALSE');
+    conditions.push('COALESCE(nus.is_read, n.is_read) = FALSE');
 
-    const query = 'UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE ' + conditions.join(' AND ');
+    const prefixedConditions = conditions.map(c => {
+      if (c.startsWith('COALESCE(') || c.startsWith('n.')) return c;
+      return c.replace(/\b(module|related_module|type|priority|title|message|actor_name|actor_id|action|target_roles|created_at|id)\b/g, 'n.$1');
+    });
 
-    await db.query(query, queryParams);
+    const whereClause = ' WHERE ' + prefixedConditions.join(' AND ');
+    const joinClause = ' FROM notifications n LEFT JOIN notification_user_states nus ON n.id = nus.notification_id AND nus.user_id = ? ';
+    const query = `SELECT n.id ${joinClause} ${whereClause}`;
+
+    const [rows] = await db.query(query, [userId, ...queryParams]);
+    for (const r of rows) {
+      await db.query(`
+        INSERT INTO notification_user_states (notification_id, user_id, is_read, read_at)
+        VALUES (?, ?, TRUE, NOW())
+        ON DUPLICATE KEY UPDATE is_read = TRUE, read_at = NOW()
+      `, [r.id, userId]);
+    }
+
     return res.status(200).json({ success: true, message: 'All relevant notifications marked as read' });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Delete a notification
+// @desc    Delete a notification for this user
 // @route   DELETE /api/notifications/:id
 // @access  Private
 export const deleteNotification = async (req, res, next) => {
@@ -325,47 +359,51 @@ export const deleteNotification = async (req, res, next) => {
     const { id } = req.params;
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id;
 
-    const { conditions, queryParams } = await buildRbacConditions(req, db);
-    conditions.push('id = ?');
-    queryParams.push(id);
+    await db.query(`
+      INSERT INTO notification_user_states (notification_id, user_id, is_deleted, deleted_at)
+      VALUES (?, ?, TRUE, NOW())
+      ON DUPLICATE KEY UPDATE is_deleted = TRUE, deleted_at = NOW()
+    `, [id, userId]);
 
-    const checkQuery = 'SELECT id FROM notifications WHERE ' + conditions.join(' AND ');
-    const [existing] = await db.query(checkQuery, queryParams);
-
-    if (existing.length === 0) {
-      return res.status(404).json({ success: false, message: 'Notification not found or access denied' });
-    }
-
-    await db.query('DELETE FROM notifications WHERE id = ?', [id]);
-    return res.status(200).json({ success: true, message: 'Notification deleted successfully' });
+    return res.status(200).json({ success: true, message: 'Notification removed for your account' });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Clear all notifications or read notifications
+// @desc    Clear all notifications for this user
 // @route   DELETE /api/notifications/clear-all
 // @access  Private
 export const clearAllNotifications = async (req, res, next) => {
   try {
-    const { readOnly } = req.query;
     const isSuperAdminMaster = req.user.role === 'Super Admin' && !req.tenantId;
     const db = isSuperAdminMaster ? masterPool : req.db;
+    const userId = req.user.id;
 
     const { conditions, queryParams } = await buildRbacConditions(req, db);
+    conditions.push('COALESCE(nus.is_deleted, FALSE) = FALSE');
 
-    if (readOnly === 'true' || readOnly === true) {
-      conditions.push('is_read = TRUE');
+    const prefixedConditions = conditions.map(c => {
+      if (c.startsWith('COALESCE(') || c.startsWith('n.')) return c;
+      return c.replace(/\b(module|related_module|type|priority|title|message|actor_name|actor_id|action|target_roles|created_at|id)\b/g, 'n.$1');
+    });
+
+    const whereClause = ' WHERE ' + prefixedConditions.join(' AND ');
+    const joinClause = ' FROM notifications n LEFT JOIN notification_user_states nus ON n.id = nus.notification_id AND nus.user_id = ? ';
+    const query = `SELECT n.id ${joinClause} ${whereClause}`;
+
+    const [rows] = await db.query(query, [userId, ...queryParams]);
+    for (const r of rows) {
+      await db.query(`
+        INSERT INTO notification_user_states (notification_id, user_id, is_deleted, deleted_at)
+        VALUES (?, ?, TRUE, NOW())
+        ON DUPLICATE KEY UPDATE is_deleted = TRUE, deleted_at = NOW()
+      `, [r.id, userId]);
     }
 
-    let query = 'DELETE FROM notifications';
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    await db.query(query, queryParams);
-    return res.status(200).json({ success: true, message: 'Notifications cleared successfully' });
+    return res.status(200).json({ success: true, message: 'All notifications cleared for your account' });
   } catch (error) {
     next(error);
   }

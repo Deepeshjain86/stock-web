@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { PlusIcon, PrinterIcon } from '@heroicons/react/24/outline';
 import Modal from '../../components/common/Modal';
 import DataTable from '../../components/common/DataTable';
@@ -129,7 +130,7 @@ const PurchaseList = () => {
       }
     } catch (err) {
       console.error('Failed to cancel purchase invoice:', err);
-      alert(err.response?.data?.message || 'Cancellation failed');
+      toast.error(err.response?.data?.message || 'Cancellation failed');
     } finally {
       setDeleteConfirm({ open: false, id: null });
     }
@@ -140,7 +141,6 @@ const PurchaseList = () => {
       if (!dbOffline) {
         // In the form: items is array of product details
         // backend expects items to be array of { product_id, quantity, purchase_price, gst, total }
-        // Let's verify form mapping:
         const itemsMapped = formData.items.map(item => ({
           product_id: item.productId || 1,
           quantity: Number(item.quantity) || 1,
@@ -164,6 +164,7 @@ const PurchaseList = () => {
         };
 
         await purchasesAPI.create(payload);
+        toast.success('Purchase invoice recorded successfully!');
         setShowModal(false);
         fetchPurchases();
       } else {
@@ -179,10 +180,11 @@ const PurchaseList = () => {
           date: formData.date || new Date().toISOString().split('T')[0],
         };
         setPurchases([newPurchase, ...purchases]);
+        toast.success('Purchase invoice recorded locally');
       }
     } catch (err) {
       console.error('Error saving purchase order:', err);
-      alert(err.response?.data?.message || 'Error processing purchase order');
+      toast.error(err.response?.data?.message || 'Error processing purchase order');
     } finally {
       setShowModal(false);
     }

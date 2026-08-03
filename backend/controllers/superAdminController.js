@@ -3,6 +3,7 @@ import mysql from 'mysql2/promise';
 import { masterPool, getTenantPool } from '../config/tenantDb.js';
 import { provisionTenantDatabase } from '../services/tenantProvisioner.js';
 import { createNotification } from '../services/notificationService.js';
+import { runFullBackup, listBackups } from '../services/backupService.js';
 
 // Helper for logger fallback since activity logs table exists on both master and tenant DBs
 const logMasterActivity = async (userId, action, module, details, ip) => {
@@ -611,5 +612,29 @@ export const handleSubscriptionAction = async (req, res, next) => {
     next(error);
   } finally {
     masterConn.release();
+  }
+};
+
+// @desc    Get all database backups list
+// @route   GET /api/superadmin/backups
+// @access  Private (Super Admin only)
+export const getBackups = async (req, res, next) => {
+  try {
+    const backups = listBackups();
+    return res.status(200).json({ success: true, count: backups.length, backups });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Trigger instant full database backup
+// @route   POST /api/superadmin/backups/trigger
+// @access  Private (Super Admin only)
+export const triggerManualBackup = async (req, res, next) => {
+  try {
+    const result = await runFullBackup();
+    return res.status(200).json({ success: true, message: 'Automated full database backup executed successfully', backup: result });
+  } catch (error) {
+    next(error);
   }
 };

@@ -1080,6 +1080,7 @@
 
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import {
     MagnifyingGlassIcon,
     XMarkIcon,
@@ -1142,6 +1143,13 @@ const ALL_PAYMENT_MODES = [
 ];
 
 const PAYMENT_METHODS = ALL_PAYMENT_MODES;
+
+const isDiscreteUnit = (unitStr) => {
+    if (!unitStr) return true;
+    const u = String(unitStr).trim().toLowerCase();
+    const metricKeywords = ['kg', 'kilogram', 'gram', 'grams', 'g', 'litre', 'liter', 'l', 'ml', 'millilitre', 'milliliter', 'meter', 'm'];
+    return !metricKeywords.includes(u);
+};
 
 
 const SalesForm = ({ sale, onSubmit, onCancel }) => {
@@ -1244,11 +1252,9 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
     const [productsList, setProductsList] = useState([]);
     const [customersList, setCustomersList] = useState([]);
     const [loadingProducts, setLoadingProducts] = useState(false);
-    const [toast, setToast] = useState(null);
-
     const showToast = (msg, type = 'error') => {
-        setToast({ msg, type });
-        setTimeout(() => setToast(null), 3500);
+        if (type === 'error') toast.error(msg);
+        else toast.success(msg);
     };
 
     /* ── Load Products & Customers from API ── */
@@ -1351,6 +1357,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 } else {
                     const price = Number(product.selling_price || product.sellingPrice || 0);
                     const gst = Number(product.gst || 18);
+                    const baseUnit = (product.unit || 'Pcs').trim();
                     const qty = 1;
                     const subtotal = price * qty;
                     const taxAmt = (subtotal * gst) / 100;
@@ -1360,7 +1367,10 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                             productId: product.id,
                             name: product.name,
                             barcode: product.barcode || '',
-                            unit: product.unit || 'Pcs',
+                            unit: baseUnit,
+                            selectedUnit: baseUnit,
+                            inputQty: 1,
+                            measurement_value: product.measurement_value || '',
                             quantity: qty,
                             availableStock: currentStock,
                             price,
@@ -1385,20 +1395,71 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
             const updated = [...prev];
             const item = { ...updated[idx] };
             
-            if (field === 'quantity') {
-                const requestedQty = Math.max(1, Number(value) || 1);
-                if (item.availableStock !== undefined && requestedQty > item.availableStock) {
-                    showToast(`Cannot exceed available stock (${item.availableStock} ${item.unit || 'Pcs'}).`, 'error');
+            const base = (item.unit || 'Pcs').trim().toLowerCase();
+
+            if (field === 'selectedUnit') {
+                item.selectedUnit = value;
+                const sel = (value || '').trim().toLowerCase();
+                const rawQty = item.inputQty === '' ? 0 : Number(item.inputQty) || 0;
+                let qtyInBaseUnit = rawQty;
+
+                if ((base === 'kg' || base === 'kilogram') && (sel === 'g' || sel === 'grams')) {
+                    qtyInBaseUnit = rawQty / 1000;
+                } else if ((base === 'litre' || base === 'l') && (sel === 'ml' || sel === 'millilitre')) {
+                    qtyInBaseUnit = rawQty / 1000;
+                } else if (base === 'grams' && (sel === 'kg' || sel === 'kilogram')) {
+                    qtyInBaseUnit = rawQty * 1000;
+                } else if (base === 'ml' && (sel === 'litre' || sel === 'l')) {
+                    qtyInBaseUnit = rawQty * 1000;
+                }
+                item.quantity = qtyInBaseUnit;
+            } else if (field === 'inputQty' || field === 'quantity') {
+                const discrete = isDiscreteUnit(item.unit);
+                let rawVal = value === '' ? '' : Number(value);
+                
+                // Enforce integer-only quantity for discrete count units (Packet, Box, Bottle, Piece, Pcs, Sachet, Carton, Dozen)
+                if (discrete && rawVal !== '') {
+                    rawVal = Math.max(1, Math.floor(rawVal));
+                }
+
+                item.inputQty = rawVal;
+                let sel = (item.selectedUnit || item.unit || 'Pcs').trim().toLowerCase();
+
+                // Smart auto-switch to Grams/Ml if user types a large number (>= 15) for Kg/Litre items while selectedUnit is Kg/Litre
+                if (!discrete && (base === 'kg' || base === 'kilogram') && sel === 'kg' && Number(rawVal) >= 15) {
+                    item.selectedUnit = 'g';
+                    sel = 'g';
+                } else if (!discrete && (base === 'litre' || base === 'l') && sel === 'litre' && Number(rawVal) >= 15) {
+                    item.selectedUnit = 'ml';
+                    sel = 'ml';
+                }
+
+                let qtyInBaseUnit = Number(rawVal) || 0;
+                if (!discrete) {
+                    if ((base === 'kg' || base === 'kilogram') && (sel === 'g' || sel === 'grams')) {
+                        qtyInBaseUnit = Number(rawVal) / 1000;
+                    } else if ((base === 'litre' || base === 'l') && (sel === 'ml' || sel === 'millilitre')) {
+                        qtyInBaseUnit = Number(rawVal) / 1000;
+                    } else if (base === 'grams' && (sel === 'kg' || sel === 'kilogram')) {
+                        qtyInBaseUnit = Number(rawVal) * 1000;
+                    } else if (base === 'ml' && (sel === 'litre' || sel === 'l')) {
+                        qtyInBaseUnit = Number(rawVal) * 1000;
+                    }
+                }
+
+                if (item.availableStock !== undefined && qtyInBaseUnit > item.availableStock) {
+                    toast.error(`Cannot exceed available stock (${item.availableStock} ${item.unit || 'Pcs'}).`);
                     item.quantity = item.availableStock;
+                    item.inputQty = (!discrete && (sel === 'g' || sel === 'ml')) ? item.availableStock * 1000 : item.availableStock;
                 } else {
-                    item.quantity = requestedQty;
+                    item.quantity = qtyInBaseUnit;
                 }
             } else {
                 item[field] = value;
             }
 
             const p = Number(item.price) || 0;
-            const q = Math.max(1, Number(item.quantity) || 1);
+            const q = Math.max(0, Number(item.quantity) || 0);
             const d = Math.min(100, Math.max(0, Number(item.discount) || 0));
             const g = Number(item.gst) || 0;
             const sub = p * q;
@@ -1413,15 +1474,15 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
 
     /* ── Calculations ── */
     const subtotal = items.reduce(
-        (s, i) => s + Number(i.price) * Math.max(1, Number(i.quantity) || 1),
+        (s, i) => s + Number(i.price) * (Number(i.quantity) || 0),
         0
     );
     const totalItemDiscount = items.reduce((s, i) => {
-        const sub = Number(i.price) * Math.max(1, Number(i.quantity) || 1);
+        const sub = Number(i.price) * (Number(i.quantity) || 0);
         return s + (sub * (Number(i.discount) || 0)) / 100;
     }, 0);
     const totalGst = items.reduce((s, i) => {
-        const sub = Number(i.price) * Math.max(1, Number(i.quantity) || 1);
+        const sub = Number(i.price) * (Number(i.quantity) || 0);
         const discAmt = (sub * (Number(i.discount) || 0)) / 100;
         const taxable = sub - discAmt;
         return s + (taxable * (Number(i.gst) || 0)) / 100;
@@ -1458,7 +1519,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
     const handleAddNewCustomerSubmit = async (e) => {
         e.preventDefault();
         if (!newCustName || !newCustPhone) {
-            alert('Please provide customer name and mobile.');
+            toast.error('Please provide customer name and mobile.');
             return;
         }
         try {
@@ -1472,7 +1533,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 status: 'Active',
             });
             if (res.success) {
-                alert('Customer registered to master database successfully!');
+                toast.success('Customer registered to master database successfully!');
                 const custRes = await customersAPI.getAll();
                 if (custRes.success || custRes.customers) {
                     setCustomersList(custRes.customers || []);
@@ -1489,7 +1550,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 setShowAddCustomerModal(false);
             }
         } catch (err) {
-            alert(err.response?.data?.message || 'Error creating customer');
+            toast.error(err.response?.data?.message || 'Error creating customer');
         }
     };
 
@@ -1815,8 +1876,6 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                 </div>
             </div>
 
-            <Toast toast={toast} />
-
             {/* ─── POS 3-COLUMN LAYOUT ─── */}
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden bg-gray-50 dark:bg-[#0b0d15] p-4 gap-4" style={{ minHeight: 0 }}>
                 {/* ─── COLUMN 1: PRODUCT SEARCH (TOP) + CUSTOMER (BOTTOM) ─── */}
@@ -1910,13 +1969,13 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                                         {p.name}
                                                     </p>
                                                     <p className="text-[10px] text-gray-500 dark:text-slate-400 font-medium">
-                                                        {p.barcode || '—'} · Stock:{' '}
+                                                        {p.barcode || '—'} · {p.measurement_value ? `${p.unit || 'Pcs'} (${p.measurement_value})` : p.unit || 'Pcs'} · Stock:{' '}
                                                         <span
                                                             className={
                                                                 stock <= 0 ? 'text-red-500 dark:text-red-400' : 'text-[#0F4C3A] dark:text-emerald-400'
                                                             }
                                                         >
-                                                            {stock} {p.unit || 'Pcs'}
+                                                            {stock}
                                                         </span>
                                                     </p>
                                                 </div>
@@ -2172,57 +2231,102 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                                     <p className="text-xs font-bold text-gray-800 dark:text-slate-100 truncate max-w-[220px]">
                                                         {item.name}
                                                     </p>
-                                                    {item.barcode && (
-                                                        <span className="text-[9px] font-mono text-gray-400 dark:text-slate-500">
-                                                            {item.barcode}
-                                                        </span>
-                                                    )}
+                                                    <div className="flex items-center gap-1.5 text-[9px] font-mono text-gray-400 dark:text-slate-500">
+                                                        <span>{item.barcode || '—'}</span>
+                                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">({item.unit || 'Pcs'})</span>
+                                                        {item.selectedUnit && item.selectedUnit !== item.unit && (
+                                                            <span className="font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 py-0.5 rounded">
+                                                                = {item.quantity} {item.unit}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="px-3 py-3">
-                                                    <div className="flex items-center justify-center gap-1.5">
+                                                    <div className="flex items-center justify-center gap-1">
                                                         <button
                                                             type="button"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                handleUpdateItem(
-                                                                    idx,
-                                                                    'quantity',
-                                                                    Math.max(1, Number(item.quantity) - 1)
-                                                                );
+                                                                const discrete = isDiscreteUnit(item.unit);
+                                                                const current = Number(item.inputQty !== undefined ? item.inputQty : item.quantity) || 0;
+                                                                let delta = 1;
+                                                                if (!discrete) {
+                                                                    delta = (item.selectedUnit === 'g' || item.selectedUnit === 'ml') ? 100 : 0.1;
+                                                                }
+                                                                const minVal = discrete ? 1 : 0.001;
+                                                                const newQty = Math.max(minVal, Number((current - delta).toFixed(3)));
+                                                                handleUpdateItem(idx, 'inputQty', newQty);
                                                             }}
-                                                            className="h-5 w-5 rounded bg-gray-100 dark:bg-[#0d101a] hover:bg-gray-200 dark:hover:bg-slate-800 text-gray-600 dark:text-slate-300 flex items-center justify-center font-bold cursor-pointer border border-gray-200 dark:border-slate-800 transition-colors"
+                                                            className="h-6 w-6 rounded bg-gray-100 dark:bg-[#0d101a] hover:bg-gray-200 dark:hover:bg-slate-800 text-gray-600 dark:text-slate-300 flex items-center justify-center font-bold cursor-pointer border border-gray-200 dark:border-slate-800 transition-colors"
+                                                            title="Decrease Quantity"
                                                         >
-                                                            <MinusIcon className="w-3 h-3 stroke-[2.5]" />
+                                                            <MinusIcon className="w-3.5 h-3.5 stroke-[2.5]" />
                                                         </button>
+
                                                         <input
                                                             id={`cart-item-qty-${idx}`}
                                                             type="number"
-                                                            value={item.quantity}
+                                                            step={isDiscreteUnit(item.unit) ? '1' : (item.selectedUnit === 'g' || item.selectedUnit === 'ml' ? '1' : '0.001')}
+                                                            min={isDiscreteUnit(item.unit) ? '1' : '0.001'}
+                                                            value={item.inputQty !== undefined ? item.inputQty : item.quantity}
                                                             onChange={(e) =>
                                                                 handleUpdateItem(
                                                                     idx,
-                                                                    'quantity',
-                                                                    Math.max(1, Number(e.target.value) || 1)
+                                                                    'inputQty',
+                                                                    e.target.value
                                                                 )
                                                             }
                                                             onClick={(e) => e.stopPropagation()}
-                                                            className="w-10 text-center bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 py-0.5 rounded text-xs font-bold text-gray-800 dark:text-slate-100 font-mono focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500"
+                                                            className="w-14 text-center bg-gray-50 dark:bg-[#0d101a] border border-gray-200 dark:border-slate-800 py-1 rounded text-xs font-bold text-gray-800 dark:text-slate-100 font-mono focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500"
                                                         />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() =>
-                                                            handleUpdateItem(
-                                                                idx,
-                                                                'quantity',
-                                                                Number(item.quantity) + 1
-                                                            )
-                                                        }
-                                                        className="h-5 w-5 rounded bg-gray-100 dark:bg-[#0d101a] hover:bg-gray-200 dark:hover:bg-slate-800 text-gray-600 dark:text-slate-300 flex items-center justify-center font-bold cursor-pointer border border-gray-200 dark:border-slate-800 transition-colors"
-                                                    >
-                                                        <PlusIcon className="w-3 h-3 stroke-[2.5]" />
-                                                    </button>
-                                                </div>
-                                            </td>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const discrete = isDiscreteUnit(item.unit);
+                                                                const current = Number(item.inputQty !== undefined ? item.inputQty : item.quantity) || 0;
+                                                                let delta = 1;
+                                                                if (!discrete) {
+                                                                    delta = (item.selectedUnit === 'g' || item.selectedUnit === 'ml') ? 100 : 0.1;
+                                                                }
+                                                                const newQty = Number((current + delta).toFixed(3));
+                                                                handleUpdateItem(idx, 'inputQty', newQty);
+                                                            }}
+                                                            className="h-6 w-6 rounded bg-gray-100 dark:bg-[#0d101a] hover:bg-gray-200 dark:hover:bg-slate-800 text-gray-600 dark:text-slate-300 flex items-center justify-center font-bold cursor-pointer border border-gray-200 dark:border-slate-800 transition-colors"
+                                                            title="Increase Quantity"
+                                                        >
+                                                            <PlusIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+                                                        </button>
+
+                                                        {/* Unit Selector Toggle dropdown (e.g. Kg vs g, Litre vs ml) */}
+                                                        {((item.unit || '').toLowerCase() === 'kg' || (item.unit || '').toLowerCase() === 'kilogram' || (item.unit || '').toLowerCase() === 'grams' || (item.unit || '').toLowerCase() === 'g') ? (
+                                                            <select
+                                                                value={item.selectedUnit || 'Kg'}
+                                                                onChange={(e) => handleUpdateItem(idx, 'selectedUnit', e.target.value)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded px-1 py-1 outline-none cursor-pointer ml-1"
+                                                            >
+                                                                <option value="Kg">Kg</option>
+                                                                <option value="g">g (Grams)</option>
+                                                            </select>
+                                                        ) : ((item.unit || '').toLowerCase() === 'litre' || (item.unit || '').toLowerCase() === 'l' || (item.unit || '').toLowerCase() === 'ml') ? (
+                                                            <select
+                                                                value={item.selectedUnit || 'Litre'}
+                                                                onChange={(e) => handleUpdateItem(idx, 'selectedUnit', e.target.value)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded px-1 py-1 outline-none cursor-pointer ml-1"
+                                                            >
+                                                                <option value="Litre">L (Litre)</option>
+                                                                <option value="ml">ml</option>
+                                                            </select>
+                                                        ) : (
+                                                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 ml-1">
+                                                                {item.unit || 'Pcs'}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
                                             <td className="px-3 py-3 text-right font-mono text-gray-700 dark:text-slate-200">
                                                 ₹{Number(item.price).toFixed(2)}
                                             </td>
