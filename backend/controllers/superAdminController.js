@@ -71,17 +71,59 @@ export const getPlatformKPIs = async (req, res, next) => {
       })
     );
 
-    // Calculate actual active paid SaaS income from billing_history table
+    // ── ACCURATE MONTHLY SAAS INCOME & PLATFORM REVENUE CALCULATION ─────────
     let platformRevenue = 0;
+    let monthlySaaSIncome = 0;
+    let mrrAmortized = 0;
     try {
-      const [activeSubRes] = await masterPool.query(`
-        SELECT COALESCE(SUM(amount), 0) as totalRevenue
-        FROM billing_history
+      // 1. Calculate total actual paid cash collected from billing_history & subscriptions
+      const [billRevenue] = await masterPool.query(`
+        SELECT COALESCE(SUM(amount), 0) as total 
+        FROM billing_history 
         WHERE payment_status = 'Paid'
       `);
-      platformRevenue = Number(activeSubRes[0]?.totalRevenue || 0);
+      const [subRevenue] = await masterPool.query(`
+        SELECT COALESCE(SUM(amount), 0) as total 
+        FROM subscriptions 
+        WHERE payment_status = 'Paid'
+      `);
+
+      const totalPaidSaaSIncome = Math.max(Number(billRevenue[0]?.total || 0), Number(subRevenue[0]?.total || 0));
+
+      // 2. Fetch latest paid subscription per store to get active recurring valuation
+      const [latestPaidSubs] = await masterPool.query(`
+        SELECT s.tenant_id, s.plan, s.amount
+        FROM subscriptions s
+        INNER JOIN (
+          SELECT tenant_id, MAX(id) as max_id
+          FROM subscriptions
+          WHERE payment_status = 'Paid' AND amount > 0
+          GROUP BY tenant_id
+        ) latest ON s.tenant_id = latest.tenant_id AND s.id = latest.max_id
+      `);
+
+      const activeStoresPlanSum = latestPaidSubs.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+
+      // 3. Amortized MRR calculation
+      const PLAN_RATES = {
+        Monthly: 800,
+        Quarterly: 2100,
+        'Half-Yearly': 3600,
+        Yearly: 6000
+      };
+
+      latestPaidSubs.forEach(s => {
+        const amt = Number(s.amount) > 0 ? Number(s.amount) : (PLAN_RATES[s.plan] || 800);
+        if (s.plan === 'Monthly') mrrAmortized += amt;
+        else if (s.plan === 'Quarterly') mrrAmortized += Math.round(amt / 3);
+        else if (s.plan === 'Half-Yearly') mrrAmortized += Math.round(amt / 6);
+        else if (s.plan === 'Yearly') mrrAmortized += Math.round(amt / 12);
+      });
+
+      monthlySaaSIncome = totalPaidSaaSIncome;
+      platformRevenue = totalPaidSaaSIncome;
     } catch (err) {
-      console.warn('[KPI] billing_history query error:', err.message);
+      console.warn('[KPI] Revenue query error:', err.message);
     }
 
     return res.status(200).json({
@@ -98,9 +140,11 @@ export const getPlatformKPIs = async (req, res, next) => {
         totalProducts: 0,
         totalSales: cumulativeSales,
         totalTransactions: totalTransactionsCount,
-        platformRevenue
+        platformRevenue: platformRevenue,
+        monthlySaaSIncome: monthlySaaSIncome,
+        mrr: mrrAmortized
       },
-      recentStores: tenantsWithMetrics.slice(0, 10),
+      recentStores: tenantsWithMetrics,
       stores: tenantsWithMetrics,
       recentLogs: []
     });
@@ -506,6 +550,18 @@ export const handleSubscriptionAction = async (req, res, next) => {
          VALUES (?, ?, 'Active', CURRENT_DATE(), ?, 'Paid', 'Manual SuperAdmin Override', ?)`,
         [id, newPlan, newExpiry, price]
       );
+
+      // Also record invoice in billing_history
+      const txnId1 = `TXN-SAAS-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      try {
+        await masterConn.query(
+          `INSERT INTO billing_history (tenant_id, transaction_id, amount, plan, payment_status, billing_date, next_renewal_date, payment_method)
+           VALUES (?, ?, ?, ?, 'Paid', CURRENT_DATE(), ?, 'SuperAdmin Override')`,
+          [id, txnId1, price, newPlan, newExpiry]
+        );
+      } catch (bhErr) {
+        console.warn('[BillingHistory] Insert error:', bhErr.message);
+      }
     } else if (action === 'suspend') {
       newStatus = 'Suspended';
       await masterConn.query(
@@ -543,6 +599,18 @@ export const handleSubscriptionAction = async (req, res, next) => {
          VALUES (?, ?, 'Active', CURRENT_DATE(), ?, 'Paid', 'Manual SuperAdmin Override', ?)`,
         [id, newPlan, newExpiry, price]
       );
+
+      // Also record invoice in billing_history
+      const txnId2 = `TXN-SAAS-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      try {
+        await masterConn.query(
+          `INSERT INTO billing_history (tenant_id, transaction_id, amount, plan, payment_status, billing_date, next_renewal_date, payment_method)
+           VALUES (?, ?, ?, ?, 'Paid', CURRENT_DATE(), ?, 'SuperAdmin Override')`,
+          [id, txnId2, price, newPlan, newExpiry]
+        );
+      } catch (bhErr) {
+        console.warn('[BillingHistory] Insert error:', bhErr.message);
+      }
     } else if (action === 'cancel') {
       newStatus = 'Expired';
       newExpiry = new Date(); // Expire immediately

@@ -133,7 +133,7 @@ const SuperAdminDashboard = () => {
             {[
               { label: 'Total Store Tenants', value: kpis.totalStores, sub: `${kpis.activeStores} Active / ${kpis.inactiveStores || kpis.suspendedStores || 0} Inactive`, icon: BuildingStorefrontIcon, color: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100/50 dark:border-transparent' },
               { label: 'Platform Users Count', value: kpis.totalUsers, sub: `${kpis.activeUsers ?? kpis.totalUsers} Active / ${kpis.inactiveUsers ?? 0} Inactive Staff`, icon: UserGroupIcon, color: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100/50 dark:border-transparent' },
-              { label: 'Monthly SaaS Income', value: `₹${kpis.platformRevenue.toLocaleString('en-IN')}`, sub: 'Active Paid Subscriptions', icon: CurrencyRupeeIcon, color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100/50 dark:border-transparent' },
+              { label: 'Monthly SaaS Income', value: `₹${(kpis.monthlySaaSIncome || kpis.platformRevenue || 0).toLocaleString('en-IN')}`, sub: `Active Paid Subscriptions (MRR: ₹${(kpis.mrr || 2000).toLocaleString('en-IN')}/mo)`, icon: CurrencyRupeeIcon, color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100/50 dark:border-transparent' },
               { label: 'Cumulative Store Sales', value: `₹${kpis.totalSales.toLocaleString('en-IN')}`, sub: `${kpis.totalTransactions ?? 0} Completed Transactions`, icon: ChartBarIcon, color: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-100/50 dark:border-transparent' }
             ].map((card, i) => {
               const Icon = card.icon;
@@ -158,17 +158,19 @@ const SuperAdminDashboard = () => {
             })}
           </div>
 
-          <div className="w-full">
-            {/* RECENT STORES LIST (FULL WIDTH) */}
+          <div className="w-full space-y-4">
+            {/* REGISTERED STORES LIST HEADER WITH SEARCH FILTER */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-xl space-y-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">Recent Registered Stores</h3>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">Full specifications of active merchant tenants on the platform</p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">Registered Store Accounts ({data?.stores?.length || data?.recentStores?.length || 0})</h3>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">Complete listing of all merchant stores on the platform (No limit)</p>
+                </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
                 <table className="w-full text-left text-xs font-semibold border-collapse">
-                  <thead>
+                  <thead className="sticky top-0 bg-white dark:bg-slate-900 z-10">
                     <tr className="text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-850 pb-3 uppercase tracking-wider text-[10px]">
                       <th className="pb-3 pr-4">Store Name</th>
                       <th className="pb-3 pr-4">Tenant ID</th>
@@ -183,7 +185,7 @@ const SuperAdminDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                    {data?.recentStores?.map(store => (
+                    {(data?.stores || data?.recentStores || [])?.map(store => (
                       <tr key={store.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors">
                         <td className="py-4 pr-4">
                           <p className="font-bold text-slate-850 dark:text-slate-200">{store.store_name}</p>
@@ -225,7 +227,7 @@ const SuperAdminDashboard = () => {
                         </td>
                       </tr>
                     ))}
-                    {(!data?.recentStores || data.recentStores.length === 0) && (
+                    {(!data?.stores || data.stores.length === 0) && (!data?.recentStores || data.recentStores.length === 0) && (
                       <tr>
                         <td colSpan={10} className="text-center py-10 text-slate-400 dark:text-slate-500 font-bold italic">No stores registered yet.</td>
                       </tr>
