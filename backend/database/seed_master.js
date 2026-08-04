@@ -59,7 +59,8 @@ async function runSeed() {
       [superAdminPassword]
     );
   } else {
-    console.log('Global platform Super Admin already exists. Credentials verified.');
+    await connection.query('UPDATE users SET password = ? WHERE email = "superadmin@kiranamart.com"', [superAdminPassword]);
+    console.log('Global platform Super Admin already exists. Password updated to superadminpassword.');
   }
 
   console.log('\n================================================');

@@ -138,7 +138,9 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
       ['manage_borrow', 'Borrow', 'Settle customer credit debts'],
       ['view_returns', 'Returns', 'View product returns logs'],
       ['create_returns', 'Returns', 'Record vendor/customer returns'],
-      ['approve_returns', 'Returns', 'Approve return credits']
+      ['approve_returns', 'Returns', 'Approve return credits'],
+      ['view_billing', 'Billing', 'View store billing and SaaS subscription status'],
+      ['view_notifications', 'Notifications', 'View system alert notifications']
     ];
 
     const permMap = {};

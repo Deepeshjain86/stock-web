@@ -75,6 +75,22 @@ export const searchInvoiceForReturn = async (req, res, next) => {
         // Compute prior total refund amount on this invoice
         const totalPriorReturnedValue = itemsWithEligibility.reduce((acc, i) => acc + (i.returned_qty * i.unit_price), 0);
 
+        // Calculate Return Policy Status:
+        // Walk-in Customer: 24 Hours (1 Day)
+        // Borrow Customer: 72 Hours (3 Days)
+        const saleDateObj = new Date(sale.sale_date);
+        const nowObj = new Date();
+        const diffMs = Math.max(0, nowObj.getTime() - saleDateObj.getTime());
+        const diffHours = diffMs / (1000 * 3600);
+
+        const isBorrowCustomer = sale.customer_type === 'Borrow' || Number(sale.due_amount) > 0 || (sale.customer_name && sale.customer_name !== 'Walk-in Customer' && sale.customer_type !== 'Walk-in');
+        const allowedHours = isBorrowCustomer ? 72 : 24;
+        const allowedDaysLabel = isBorrowCustomer ? '72-Hour (3-Day)' : '24-Hour (1-Day)';
+        const customerTypeLabel = isBorrowCustomer ? 'Borrow Customer' : 'Walk-in Customer';
+
+        const isWithinPolicy = diffHours <= allowedHours;
+        const remainingHours = Math.max(0, Math.ceil(allowedHours - diffHours));
+
         return {
           ...sale,
           grand_total: Number(sale.grand_total),
@@ -84,6 +100,12 @@ export const searchInvoiceForReturn = async (req, res, next) => {
           invoice_borrow_remaining: invoiceBorrowRemaining,
           invoice_borrow_status: invoiceBorrowStatus,
           total_prior_returned_value: totalPriorReturnedValue,
+          hours_since_sale: Math.floor(diffHours),
+          allowed_hours: allowedHours,
+          is_policy_eligible: isWithinPolicy,
+          policy_message: isWithinPolicy
+            ? `Within ${allowedDaysLabel} Return Policy (${remainingHours} hour(s) remaining for ${customerTypeLabel})`
+            : `Return Period Expired (${Math.floor(diffHours)} hours since purchase. ${customerTypeLabel} policy limit is ${allowedHours} Hours).`,
           items: itemsWithEligibility
         };
       })
@@ -248,6 +270,25 @@ export const createSalesReturn = async (req, res, next) => {
     }
 
     const sale = sales[0];
+    const saleDateObj = new Date(sale.date || sale.created_at || Date.now());
+    const nowObj = new Date();
+    const diffMs = Math.max(0, nowObj.getTime() - saleDateObj.getTime());
+    const diffHours = diffMs / (1000 * 3600);
+
+    const isBorrowCustomer = sale.customer_type === 'Borrow' || Number(sale.due_amount) > 0 || (sale.customer_name && sale.customer_name !== 'Walk-in Customer' && sale.customer_type !== 'Walk-in');
+    const allowedHours = isBorrowCustomer ? 72 : 24;
+    const allowedDaysLabel = isBorrowCustomer ? '72-Hour (3-Day)' : '24-Hour (1-Day)';
+    const customerTypeLabel = isBorrowCustomer ? 'Borrow Customers' : 'Walk-in Customers';
+
+    if (diffHours > allowedHours) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({
+        success: false,
+        message: `Return Policy Expired: ${customerTypeLabel} have a ${allowedDaysLabel} return policy limit. This invoice was issued ${Math.floor(diffHours)} hours ago.`
+      });
+    }
+
     const warehouseId = sale.warehouse_id || 1;
     const returnNo = `RET-${Date.now().toString().slice(-6)}`;
     let grandRefundAmount = 0;
@@ -267,9 +308,9 @@ export const createSalesReturn = async (req, res, next) => {
 
       if (saleItems.length === 0) continue;
 
-      const item = saleItems[0];
-      const soldQty = Number(item.quantity);
-      const unitPrice = Number(item.selling_price) > 0 ? Number(item.selling_price) : (Number(item.total) / (soldQty || 1));
+      const totalSoldQty = saleItems.reduce((acc, row) => acc + Number(row.quantity), 0);
+      const firstItem = saleItems[0];
+      const unitPrice = Number(firstItem.selling_price) > 0 ? Number(firstItem.selling_price) : (Number(firstItem.total) / (Number(firstItem.quantity) || 1));
 
       // Check already returned quantity
       const [priorReturns] = await connection.query(
@@ -278,14 +319,23 @@ export const createSalesReturn = async (req, res, next) => {
       );
 
       const alreadyReturned = Number(priorReturns[0].total);
-      const remainingEligible = soldQty - alreadyReturned;
+      const remainingEligible = Math.max(0, totalSoldQty - alreadyReturned);
+
+      if (remainingEligible <= 0 || returnQty > remainingEligible) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          message: `Return quantity (${returnQty}) exceeds remaining eligible units (${remainingEligible}) for product ID ${pId}.`
+        });
+      }
 
       if (returnQty > remainingEligible) {
         await connection.rollback();
         connection.release();
         return res.status(400).json({
           success: false,
-          message: `Return quantity (${returnQty}) exceeds eligible sold quantity (${remainingEligible}) for product ID ${pId}.`
+          message: `Return quantity (${returnQty}) exceeds remaining eligible quantity (${remainingEligible}) for product ID ${pId}.`
         });
       }
 
@@ -331,6 +381,24 @@ export const createSalesReturn = async (req, res, next) => {
           );
         }
 
+        // Synchronize purchase_batches for instant Product catalog & stock report updates
+        const [existingPb] = await connection.query(
+          'SELECT id FROM purchase_batches WHERE product_id = ? ORDER BY id DESC LIMIT 1',
+          [pId]
+        );
+        if (existingPb.length > 0) {
+          await connection.query(
+            'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?',
+            [returnQty, existingPb[0].id]
+          );
+        } else {
+          await connection.query(
+            `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, warehouse_id)
+             VALUES (?, ?, ?, ?, CURRENT_DATE(), ?)`,
+            [pId, `RETURN-RESTORE-${Date.now()}`, returnQty, returnQty, warehouseId]
+          );
+        }
+
         await connection.query(
           `INSERT INTO stock_logs (product_id, warehouse_id, type, quantity, reference_no, notes, user_id)
            VALUES (?, ?, 'Stock In', ?, ?, ?, ?)`,
@@ -346,7 +414,6 @@ export const createSalesReturn = async (req, res, next) => {
     }
 
     // ── ERP BUSINESS LOGIC FOR CREDIT/BORROW VS PAID RETURNS ──────────────────
-    const isBorrowCustomer = sale.customer_type === 'Borrow' || sale.due_amount > 0;
     const currentPaid = Number(sale.amount_paid);
 
     if (isBorrowCustomer && sale.customer_id) {
@@ -423,10 +490,35 @@ export const createSalesReturn = async (req, res, next) => {
         }
       }
 
-      // 3. Log Udhaar Credit Return Entry in borrow_records
+      // 3. If refund value remains (e.g. customer paid bill in full beforehand or has zero remaining dues),
+      // deposit excess money into Customer's Advance Credit Balance (Customer Wallet / Store Credit)
+      if (remainingRefundToDeduct > 0 && sale.customer_id) {
+        await connection.query(
+          'UPDATE customers SET advance_balance = COALESCE(advance_balance, 0) + ? WHERE id = ?',
+          [remainingRefundToDeduct, sale.customer_id]
+        );
+
+        await connection.query(
+          `INSERT INTO borrow_records (customer_id, amount, type, date, notes) VALUES (?, ?, 'Advance Deposit', NOW(), ?)`,
+          [sale.customer_id, remainingRefundToDeduct, `Sales Return (${returnNo}) Advance Credit Deposit for invoice ${sale.invoice_no}: ₹${remainingRefundToDeduct}`]
+        );
+      }
+
+      // 4. Log Udhaar Credit Return Entry in borrow_records
       await connection.query(
         `INSERT INTO borrow_records (customer_id, amount, type, date, notes) VALUES (?, ?, 'Return', NOW(), ?)`,
         [sale.customer_id, grandRefundAmount, `Sales Return (${returnNo}) for invoice ${sale.invoice_no}: ₹${grandRefundAmount}`]
+      );
+    } else if (sale.customer_id && (return_type === 'Store Credit' || return_type === 'Credit Adjustment (Udhaar Credit Note)' || return_type === 'Refund')) {
+      // Customer is a registered customer who paid upfront — credit refund directly to Customer Advance Balance
+      await connection.query(
+        'UPDATE customers SET advance_balance = COALESCE(advance_balance, 0) + ? WHERE id = ?',
+        [grandRefundAmount, sale.customer_id]
+      );
+
+      await connection.query(
+        `INSERT INTO borrow_records (customer_id, amount, type, date, notes) VALUES (?, ?, 'Advance Deposit', NOW(), ?)`,
+        [sale.customer_id, grandRefundAmount, `Sales Return (${returnNo}) Advance Credit Deposit for invoice ${sale.invoice_no}: ₹${grandRefundAmount}`]
       );
     }
 
@@ -446,10 +538,7 @@ export const createSalesReturn = async (req, res, next) => {
 
     // Specific Return Type Adjustments
     if (return_type === 'Store Credit' && sale.customer_id) {
-      await connection.query(
-        'INSERT INTO borrow_records (customer_id, amount, type, date, notes) VALUES (?, ?, ?, NOW(), ?)',
-        [sale.customer_id, grandRefundAmount, 'Payback', `Sales Return Store Credit Voucher: ${returnNo}`]
-      );
+      // Handled above via advance_balance
     } else if (return_type === 'Cancel Item from Invoice') {
       const newSaleTotal = Math.max(0, Number(sale.total) - grandRefundAmount);
       await connection.query(
@@ -472,25 +561,30 @@ export const createSalesReturn = async (req, res, next) => {
 
     await connection.commit();
 
-    // Log Activity & System Notifications AFTER transaction commit
+    // Log Activity & System Notifications AFTER transaction commit safely
     try {
-      await logActivity(
-        req.user.id,
-        'Process Sales Return',
-        'Sales',
-        `Processed sales return ${returnNo} for invoice ${sale.invoice_no} (Refund/Credit: ₹${grandRefundAmount}, Type: ${return_type})`,
-        req.ip
-      );
+      if (req.user?.id) {
+        await logActivity(
+          req.user.id,
+          'Process Sales Return',
+          'Sales',
+          `Processed sales return ${returnNo} for invoice ${sale.invoice_no} (Refund/Credit: ₹${grandRefundAmount}, Type: ${return_type})`,
+          req.ip
+        );
+      }
 
       await createNotification({
+        tenantId: req.tenantId,
+        user_id: req.user?.id,
         type: 'Stock Return',
         title: 'Sales Return Completed',
         message: `Sales Return ${returnNo} processed for invoice "${sale.invoice_no}" (Refund/Credit: ₹${grandRefundAmount}, ${return_type}).`,
         priority: 'Medium',
-        related_user: req.user.email,
+        related_user: req.user?.name || req.user?.email || 'Staff',
+        module: 'Sales',
         related_module: 'Returns',
         target_roles: 'Admin,Manager,Staff'
-      }, req.db);
+      });
     } catch (logErr) {
       console.warn('[SalesReturn] Non-critical notification/activity logging warning:', logErr.message);
     }
@@ -503,6 +597,113 @@ export const createSalesReturn = async (req, res, next) => {
       returnNo,
       returnId: createdReturnId,
       refundAmount: grandRefundAmount
+    });
+  } catch (error) {
+    try {
+      await connection.rollback();
+    } catch (rbErr) {
+      // Ignore rollback error if transaction already committed
+    }
+    console.error('API Error in createSalesReturn:', error.message);
+    next(error);
+  } finally {
+    try {
+      connection.release();
+    } catch (relErr) {
+      // Ignore release error if connection already released
+    }
+  }
+};
+
+// @desc    Void / Delete Sales Return Voucher and restore eligible quantity & stock
+// @route   DELETE /api/sales-returns/:id
+// @access  Private
+export const deleteSalesReturn = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+
+    const [returnRows] = await connection.query(
+      'SELECT * FROM sales_returns WHERE id = ?',
+      [id]
+    );
+
+    if (returnRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'Sales return voucher not found' });
+    }
+
+    const ret = returnRows[0];
+
+    // Reverse stock adjustment (deduct stock that was returned)
+    const [saleRows] = await connection.query('SELECT warehouse_id FROM sales WHERE id = ?', [ret.sale_id]);
+    const warehouseId = saleRows.length > 0 && saleRows[0].warehouse_id ? saleRows[0].warehouse_id : 1;
+
+    await connection.query(
+      'UPDATE stock SET quantity = GREATEST(0, quantity - ?) WHERE product_id = ? AND warehouse_id = ?',
+      [ret.quantity, ret.product_id, warehouseId]
+    );
+
+    // Deduct quantity from purchase_batches as well
+    const [existingPb] = await connection.query(
+      'SELECT id, remaining_quantity FROM purchase_batches WHERE product_id = ? AND remaining_quantity > 0 ORDER BY id DESC LIMIT 1',
+      [ret.product_id]
+    );
+    if (existingPb.length > 0) {
+      await connection.query(
+        'UPDATE purchase_batches SET remaining_quantity = GREATEST(0, remaining_quantity - ?) WHERE id = ?',
+        [ret.quantity, existingPb[0].id]
+      );
+    }
+
+    // Log stock reversal
+    await connection.query(
+      `INSERT INTO stock_logs (product_id, warehouse_id, type, quantity, reference_no, notes, user_id)
+       VALUES (?, ?, 'Stock Out', ?, ?, ?, ?)`,
+      [
+        ret.product_id,
+        warehouseId,
+        ret.quantity,
+        `VOID-${ret.return_no}`,
+        `Voided Sales Return ${ret.return_no} for Invoice ${ret.invoice_no}`,
+        req.user.id
+      ]
+    );
+
+    // Reverse Udhaar / Customer advance balance if applicable
+    if (ret.return_type === 'Credit Adjustment (Udhaar Credit Note)' || ret.refund_method === 'Credit Note / Udhaar Settlement') {
+      const [saleDetail] = await connection.query('SELECT customer_id, due_amount FROM sales WHERE id = ?', [ret.sale_id]);
+      if (saleDetail.length > 0) {
+        const refundVal = Number(ret.refund_amount);
+        await connection.query('UPDATE sales SET due_amount = due_amount + ? WHERE id = ?', [refundVal, ret.sale_id]);
+        await connection.query(
+          'UPDATE borrow_transactions SET remaining_amount = remaining_amount + ?, payment_status = IF(remaining_amount + ? >= total_amount, "Pending", "Partial Paid") WHERE invoice_no = ?',
+          [refundVal, refundVal, ret.invoice_no]
+        );
+      }
+    }
+
+    if (ret.customer_name && ret.customer_name !== 'Walk-in Customer') {
+      const [cRows] = await connection.query('SELECT id FROM customers WHERE name = ? OR phone = ? LIMIT 1', [ret.customer_name, ret.customer_phone]);
+      if (cRows.length > 0) {
+        await connection.query(
+          'UPDATE customers SET advance_balance = GREATEST(0, advance_balance - ?) WHERE id = ?',
+          [Number(ret.refund_amount) || 0, cRows[0].id]
+        );
+      }
+    }
+
+    // Delete sales_returns record
+    await connection.query('DELETE FROM sales_returns WHERE id = ?', [id]);
+
+    await connection.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: `Sales return voucher ${ret.return_no || id} voided successfully. Invoice return limits and stock restored.`
     });
   } catch (error) {
     await connection.rollback();

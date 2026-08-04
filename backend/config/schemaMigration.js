@@ -236,6 +236,49 @@ export const runCategorySchemaMigrations = async (pool) => {
       console.warn('[Schema Migration] sales table check:', e.message);
     }
 
+    // ── ENSURE SALES_RETURNS TABLE HAS ALL ENHANCED COLUMNS ──
+    try {
+      const [srCols] = await pool.query('DESCRIBE sales_returns');
+      const srColNames = srCols.map(c => c.Field);
+      const expectedSrCols = [
+        { name: 'return_no', type: 'VARCHAR(50) NULL' },
+        { name: 'customer_name', type: 'VARCHAR(255) NULL' },
+        { name: 'customer_phone', type: 'VARCHAR(50) NULL' },
+        { name: 'return_type', type: "VARCHAR(50) DEFAULT 'Refund'" },
+        { name: 'refund_method', type: "VARCHAR(50) DEFAULT 'Cash'" },
+        { name: 'remarks', type: 'TEXT NULL' },
+        { name: 'replacement_product_id', type: 'INT NULL' },
+        { name: 'replacement_quantity', type: 'INT NULL' },
+        { name: 'price_difference', type: 'DECIMAL(10,2) DEFAULT 0.00' },
+        { name: 'user_id', type: 'INT NULL' }
+      ];
+      for (const col of expectedSrCols) {
+        if (!srColNames.includes(col.name)) {
+          await pool.query(`ALTER TABLE sales_returns ADD COLUMN ${col.name} ${col.type}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] sales_returns table check:', e.message);
+    }
+
+    // ── AUTO-REPAIR CUSTOMERS TABLE ADVANCE BALANCE COLUMN ──
+    try {
+      const [cCols] = await pool.query('DESCRIBE customers');
+      const cColNames = cCols.map(c => c.Field);
+      if (!cColNames.includes('advance_balance')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN advance_balance DECIMAL(12,2) DEFAULT 0.00');
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] customers advance_balance check:', e.message);
+    }
+
+    // ── AUTO-REPAIR BORROW_RECORDS TYPE COLUMN TO VARCHAR(50) ──
+    try {
+      await pool.query('ALTER TABLE borrow_records MODIFY COLUMN type VARCHAR(50) NOT NULL');
+    } catch (e) {
+      console.warn('[Schema Migration] borrow_records type column modify check:', e.message);
+    }
+
     // ── ALTER QUANTITY COLUMNS TO DECIMAL(12,3) FOR LOOSE / WEIGHT / VOLUME / FRACTIONAL SELLING ──
     try {
       await pool.query('ALTER TABLE stock MODIFY COLUMN quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000');

@@ -411,6 +411,10 @@ export const salesReturnsAPI = {
     const response = await API.post('/sales-returns', data);
     return response.data;
   },
+  delete: async (id) => {
+    const response = await API.delete(`/sales-returns/${id}`);
+    return response.data;
+  }
 };
 
 // Vendor Stock Returns Services

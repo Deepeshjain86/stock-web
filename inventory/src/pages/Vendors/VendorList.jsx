@@ -540,7 +540,7 @@ const VendorList = () => {
       const res = await purchasesAPI.getAll({ vendor_id: vId, vendorId: vId });
       if (res && res.success && res.purchases && res.purchases.length > 0) {
         setVendorInvoices(res.purchases);
-        handlePurchaseInvoiceChange(res.purchases[0].id, res.purchases[0]);
+        handlePurchaseInvoiceChange(res.purchases[0].id);
       } else {
         setVendorInvoices([]);
         setSelectedPurchaseId('');
@@ -562,9 +562,9 @@ const VendorList = () => {
 
     try {
       let purchObj = directObj;
-      if (!purchObj) {
+      if (!purchObj || !purchObj.items || purchObj.items.length === 0) {
         const res = await purchasesAPI.getById(purchaseId);
-        if (res && res.success) {
+        if (res && res.success && res.purchase) {
           purchObj = res.purchase;
         }
       }
@@ -572,9 +572,9 @@ const VendorList = () => {
       if (purchObj) {
         setSelectedPurchaseObj(purchObj);
         const initialState = {};
-        if (purchObj.items) {
+        if (purchObj.items && Array.isArray(purchObj.items)) {
           purchObj.items.forEach(item => {
-            const purchasedQty = Number(item.quantity);
+            const purchasedQty = Number(item.quantity || 0);
             const returnedQty = Number(item.returnedQuantity || 0);
             const maxQty = Math.max(0, purchasedQty - returnedQty);
 
@@ -588,6 +588,9 @@ const VendorList = () => {
           });
         }
         setReturnItemsState(initialState);
+      } else {
+        setSelectedPurchaseObj(null);
+        setReturnItemsState({});
       }
     } catch (err) {
       console.error('Failed to load purchase invoice details for return:', err);

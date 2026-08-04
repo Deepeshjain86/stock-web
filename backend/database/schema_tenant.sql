@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS customers (
   opening_balance DECIMAL(12,2) DEFAULT 0.00,
   credit_limit DECIMAL(12,2) DEFAULT 0.00,
   outstanding_balance DECIMAL(12,2) DEFAULT 0.00,
+  advance_balance DECIMAL(12,2) DEFAULT 0.00,
   created_by INT NULL,
   updated_by INT NULL,
   expires_at DATETIME NULL,
@@ -511,7 +512,7 @@ CREATE TABLE IF NOT EXISTS borrow_records (
   id INT AUTO_INCREMENT PRIMARY KEY,
   customer_id INT NOT NULL,
   amount DECIMAL(10,2) NOT NULL,
-  type ENUM('Borrow', 'Payback', 'Return') NOT NULL,
+  type VARCHAR(50) NOT NULL DEFAULT 'Borrow',
   date DATE NOT NULL,
   notes TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -541,15 +542,26 @@ CREATE TABLE IF NOT EXISTS borrow_transactions (
 -- 22. Sales Returns Table
 CREATE TABLE IF NOT EXISTS sales_returns (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  return_no VARCHAR(50) NULL,
   sale_id INT NOT NULL,
   invoice_no VARCHAR(50) NOT NULL,
+  customer_name VARCHAR(255) NULL,
+  customer_phone VARCHAR(50) NULL,
   product_id INT NOT NULL,
   quantity INT NOT NULL,
   refund_amount DECIMAL(10,2) NOT NULL,
   reason VARCHAR(255) NOT NULL,
+  return_type VARCHAR(50) DEFAULT 'Refund',
+  refund_method VARCHAR(50) DEFAULT 'Cash',
+  remarks TEXT NULL,
+  replacement_product_id INT NULL,
+  replacement_quantity INT NULL,
+  price_difference DECIMAL(10,2) DEFAULT 0.00,
+  user_id INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (replacement_product_id) REFERENCES products(id) ON DELETE SET NULL
 );
 
 -- 23. Purchase Returns Table

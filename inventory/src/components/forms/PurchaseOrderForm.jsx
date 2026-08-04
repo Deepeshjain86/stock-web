@@ -38,6 +38,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
   const [quantity, setQuantity] = useState(1);
   const [customPrice, setCustomPrice] = useState('');
   const [itemGst, setItemGst] = useState(18);
+  const [manualGst, setManualGst] = useState('');
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -65,6 +66,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     const rawPrice = customPrice !== '' ? parseFloat(customPrice) : product.purchasePrice;
     const price = isNaN(rawPrice) || rawPrice <= 0 ? 0 : rawPrice;
     const qty = Number(quantity) || 1;
+    const gstRate = parseFloat(itemGst) >= 0 ? parseFloat(itemGst) : 0;
 
     // Check duplicate
     const existsIndex = formData.items.findIndex(
@@ -74,17 +76,18 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     if (existsIndex > -1) {
       const updated = [...formData.items];
       updated[existsIndex].quantity += qty;
-      updated[existsIndex].total = updated[existsIndex].quantity * updated[existsIndex].purchase_price * (1 + updated[existsIndex].gst / 100);
+      updated[existsIndex].gst = gstRate;
+      updated[existsIndex].total = updated[existsIndex].quantity * updated[existsIndex].purchase_price * (1 + gstRate / 100);
       setFormData({ ...formData, items: updated });
     } else {
-      const total = price * qty * (1 + itemGst / 100);
+      const total = price * qty * (1 + gstRate / 100);
       const newItem = {
         product_id: product.id,
         name: product.name,
         barcode: product.barcode,
         quantity: qty,
         purchase_price: price,
-        gst: itemGst,
+        gst: gstRate,
         unit: product.unit,
         total,
       };
@@ -105,31 +108,36 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
 
   const calculateTotals = () => {
     let subtotal = 0;
-    let gstAmount = 0;
+    let autoGstAmount = 0;
 
     formData.items.forEach((item) => {
       const base = item.purchase_price * item.quantity;
       subtotal += base;
-      gstAmount += base * (item.gst / 100);
+      autoGstAmount += base * ((item.gst || 0) / 100);
     });
+
+    const gstAmount = manualGst !== '' && !isNaN(parseFloat(manualGst))
+      ? Math.max(0, parseFloat(manualGst))
+      : autoGstAmount;
 
     const total = subtotal + gstAmount;
 
     return {
       subtotal,
+      autoGstAmount,
       gstAmount,
       total,
     };
   };
 
-  const { subtotal, gstAmount, total } = calculateTotals();
+  const { subtotal, autoGstAmount, gstAmount, total } = calculateTotals();
 
   const handleProductSelect = (prodId) => {
     setSelectedProduct(prodId);
     const p = dbProducts.find((x) => String(x.id) === String(prodId));
     if (p) {
       setCustomPrice(p.purchasePrice.toString());
-      setItemGst(p.gst);
+      setItemGst(p.gst ?? 18);
     }
   };
 
@@ -223,7 +231,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
         
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-end">
           {/* Select Product */}
-          <div className="sm:col-span-5 space-y-1.5">
+          <div className="sm:col-span-4 space-y-1.5">
             <label className="text-[10px] font-bold text-slate-500">Product Name</label>
             <select
               value={selectedProduct}
@@ -264,8 +272,23 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
             />
           </div>
 
+          {/* GST % */}
+          <div className="sm:col-span-1.5 space-y-1.5">
+            <label className="text-[10px] font-bold text-slate-500">GST %</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="any"
+              value={itemGst}
+              onChange={(e) => setItemGst(e.target.value)}
+              placeholder="18"
+              className="w-full bg-slate-50/50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
           {/* Add Button */}
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-1.5">
             <button
               type="button"
               onClick={handleAddItem}
@@ -346,9 +369,20 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
             <span>Sub Total:</span>
             <span className="font-mono text-slate-900">₹{subtotal.toFixed(2)}</span>
           </div>
-          <div className="flex justify-between items-center text-xs font-bold text-slate-500">
-            <span>Tax (GST):</span>
-            <span className="font-mono text-slate-900">₹{gstAmount.toFixed(2)}</span>
+          <div className="flex justify-between items-center text-xs font-bold text-slate-500 gap-3">
+            <span className="flex items-center gap-1">
+              <span>Tax (GST) (₹):</span>
+              <span className="text-[10px] text-indigo-600 font-medium">(Manual Editable)</span>
+            </span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={manualGst !== '' ? manualGst : (autoGstAmount > 0 ? autoGstAmount.toFixed(2) : '0')}
+              onChange={(e) => setManualGst(e.target.value)}
+              placeholder="0.00"
+              className="w-28 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-right text-xs font-bold font-mono text-slate-900 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+            />
           </div>
           <hr className="border-slate-200/80" />
           <div className="flex justify-between items-center text-sm font-black text-slate-800">

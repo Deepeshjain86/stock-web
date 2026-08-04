@@ -171,6 +171,7 @@ const BorrowLedger = () => {
 
   // Compute KPI cards totals
   const totalOutstanding = summary.reduce((sum, item) => sum + Number(item.balance), 0);
+  const totalAdvanceCredit = summary.reduce((sum, item) => sum + Number(item.advance_balance || 0), 0);
   const debtorCount = summary.filter(item => Number(item.balance) > 0).length;
 
   return (
@@ -189,13 +190,13 @@ const BorrowLedger = () => {
       />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight">Customer Borrow Ledger</h2>
-          <p className="text-xs font-semibold text-slate-500 mt-0.5">Manage customer credits, accounts receivables, and record paybacks (Udhaar)</p>
+          <h2 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight">Customer Borrow & Ledger Management</h2>
+          <p className="text-xs font-semibold text-slate-500 mt-0.5">Manage customer credit accounts, advance deposits, receivables, and paybacks</p>
         </div>
       </div>
 
       {/* KPI METRICS OVERVIEW */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Outstanding Due</span>
@@ -204,6 +205,17 @@ const BorrowLedger = () => {
           </div>
           <div className="p-3 rounded-xl bg-rose-50 text-rose-600">
             <ArrowTrendingUpIcon className="w-6 h-6" />
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Customer Advance Jama</span>
+            <p className="text-2xl font-black text-emerald-600">₹{totalAdvanceCredit.toLocaleString('en-IN')}</p>
+            <span className="text-[10px] font-semibold text-slate-500 block">Prepaid wallet & return credits</span>
+          </div>
+          <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600">
+            <ArrowTrendingDownIcon className="w-6 h-6" />
           </div>
         </div>
 
@@ -225,7 +237,7 @@ const BorrowLedger = () => {
             <span className="text-[10px] font-semibold text-slate-500 block">Payment recovery active</span>
           </div>
           <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600">
-            <ArrowTrendingDownIcon className="w-6 h-6" />
+            <BookOpenIcon className="w-6 h-6" />
           </div>
         </div>
       </div>
@@ -258,37 +270,61 @@ const BorrowLedger = () => {
                   <th className="py-3 px-4">Customer</th>
                   <th className="py-3 px-4">Contact Details</th>
                   <th className="py-3 px-4">Address</th>
-                  <th className="py-3 px-4 text-right">Outstanding Balance</th>
+                  <th className="py-3 px-4 text-right">Account Balance Status</th>
                   <th className="py-3 px-4 text-center">Ledger Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredSummary.map((customer) => (
                   <tr key={customer.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3 px-4 font-bold text-slate-800">{customer.name}</td>
+                    <td className="py-3 px-4 font-bold text-slate-800">
+                      {customer.name}
+                      <span className="block text-[9px] text-slate-400 font-normal">{customer.customer_code || ''}</span>
+                    </td>
                     <td className="py-3 px-4">
                       <p className="text-slate-700">{customer.phone || 'No Phone'}</p>
                       <p className="text-[10px] text-slate-400">{customer.email || ''}</p>
                     </td>
                     <td className="py-3 px-4 text-slate-500">{customer.address || 'Counter Billing'}</td>
                     <td className="py-3 px-4 text-right">
-                      <span className={`text-sm font-black ${Number(customer.balance) > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                        ₹{Number(customer.balance).toLocaleString('en-IN')}
-                      </span>
+                      {Number(customer.balance) > 0 ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-rose-100 text-rose-700 border border-rose-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+                            ₹{Number(customer.balance).toLocaleString('en-IN')} Due (Udhaar)
+                          </span>
+                          <span className="text-[9px] font-bold text-rose-500 uppercase tracking-wider">Customer owes store</span>
+                        </div>
+                      ) : Number(customer.advance_balance) > 0 ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-700 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                            ₹{Number(customer.advance_balance).toLocaleString('en-IN')} Advance (Jama)
+                          </span>
+                          <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider">Auto-minus next bill</span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-500">
+                            ₹0 Settled
+                          </span>
+                          <span className="text-[9px] font-semibold text-slate-400">Clear account</span>
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center justify-center gap-2">
                         {!isReadOnly && (
                           <button
                             onClick={() => handleOpenTx(customer)}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg transition-all"
+                            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-lg transition-all cursor-pointer"
                           >
                             <PlusIcon className="w-3.5 h-3.5 stroke-[2.5]" /> Record Payback
                           </button>
                         )}
                         <button
                           onClick={() => handleOpenHistory(customer)}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg transition-all"
+                          className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg transition-all cursor-pointer"
                         >
                           View Ledger
                         </button>
@@ -419,9 +455,19 @@ const BorrowLedger = () => {
                   <h3 className="text-sm font-bold uppercase tracking-wider">Customer Statement Account</h3>
                   <p className="text-[10px] text-slate-400 mt-0.5">Statement sheet for {selectedCustomer.name}</p>
                 </div>
-                <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-white p-1">
-                  <XMarkIcon className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <span className="text-[9px] text-emerald-400 uppercase font-black tracking-wider block">Advance Credit</span>
+                    <span className="text-sm font-black text-emerald-400">₹{Number(selectedCustomer.advance_balance || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="text-right border-l border-slate-700 pl-4">
+                    <span className="text-[9px] text-rose-400 uppercase font-black tracking-wider block">Outstanding Due</span>
+                    <span className="text-sm font-black text-rose-400">₹{Number(selectedCustomer.balance || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <button onClick={() => setShowHistoryModal(false)} className="text-slate-400 hover:text-white p-1 ml-2">
+                    <XMarkIcon className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               <div className="p-6 space-y-4">
@@ -442,9 +488,11 @@ const BorrowLedger = () => {
                           <td className="py-3 px-3 text-slate-600">{new Date(log.date).toLocaleDateString()}</td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              log.type === 'Borrow' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                              log.type === 'Borrow' ? 'bg-rose-50 text-rose-600' :
+                              log.type === 'Advance Deposit' ? 'bg-emerald-100 text-emerald-800' :
+                              'bg-indigo-50 text-indigo-600'
                             }`}>
-                              {log.type === 'Borrow' ? 'Borrow' : 'Payback'}
+                              {log.type}
                             </span>
                           </td>
                           <td className="py-3 px-3 font-bold text-slate-800">₹{Number(log.amount).toLocaleString('en-IN')}</td>

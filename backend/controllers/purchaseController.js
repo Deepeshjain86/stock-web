@@ -1018,27 +1018,30 @@ export const getPurchaseById = async (req, res, next) => {
 // @route   POST /api/purchases
 // @access  Private
 export const createPurchase = async (req, res, next) => {
+  console.log('[createPurchase] req.body:', JSON.stringify(req.body));
   const connection = await req.db.getConnection();
   try {
     await connection.beginTransaction();
 
-    const {
-      vendor_id,
-      warehouse_id,
-      date,
-      subtotal,
-      discount,
-      gst_amount,
-      total,
-      payment_status,
-      delivery_status,
-      payment_method,
-      items,
-      purchase_order_id,
-      grn_id
-    } = req.body;
+    const vendor_id = req.body.vendor_id || req.body.vendorId;
+    const warehouse_id = req.body.warehouse_id || req.body.warehouseId || 1;
+    const date = req.body.date || req.body.purchase_date || new Date().toISOString().split('T')[0];
+    const subtotal = req.body.subtotal || 0;
+    const discount = req.body.discount || 0;
+    const gst_amount = req.body.gst_amount || req.body.gstAmount || 0;
+    const total = req.body.total || 0;
+    const payment_status = req.body.payment_status || req.body.paymentStatus || req.body.payment_type || 'Paid';
+    const delivery_status = req.body.delivery_status || req.body.deliveryStatus || 'Received';
+    const payment_method = req.body.payment_method || req.body.paymentMethod || req.body.payment_type || 'Cash';
+    const items = req.body.items;
+    const purchase_order_id = req.body.purchase_order_id || req.body.purchaseOrderId || null;
+    const grn_id = req.body.grn_id || req.body.grnId || null;
 
-    if (!vendor_id || !warehouse_id || !date || !items || items.length === 0) {
+    console.log('[createPurchase] parsed vendor_id:', vendor_id, 'items:', items);
+
+    if (!vendor_id || !items || items.length === 0) {
+      await connection.rollback();
+      connection.release();
       return res.status(400).json({ success: false, message: 'Missing purchase header details or products list' });
     }
 
@@ -1074,8 +1077,15 @@ export const createPurchase = async (req, res, next) => {
     }
     const purchaseNo = `PUR-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
 
-    // Calculate payment status and paid amount
-    const invoiceTotal = Number(total || 0);
+    // Calculate payment status and total amounts safely
+    const itemsTotal = Array.isArray(items) ? items.reduce((sum, item) => {
+      const q = Number(item.quantity || 0);
+      const p = Number(item.purchase_price || item.purchasePrice || item.price || item.unit_price || 0);
+      return sum + (q * p);
+    }, 0) : 0;
+
+    const invoiceSubtotal = Number(subtotal || itemsTotal);
+    const invoiceTotal = Number(total || (invoiceSubtotal - Number(discount || 0) + Number(gst_amount || 0)));
     let actualPaymentStatus = payment_status || 'Pending';
     let initialPaid = Number(req.body.paid_amount || 0);
 
@@ -1100,20 +1110,18 @@ export const createPurchase = async (req, res, next) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         purchaseNo, vendor_id, warehouse_id, date, 
-        subtotal || 0, discount || 0, gst_amount || 0, invoiceTotal, initialPaid,
+        invoiceSubtotal, discount || 0, gst_amount || 0, invoiceTotal, initialPaid,
         actualPaymentStatus, delivery_status || 'Received', payment_method || 'Cash',
         purchase_order_id || null, grn_id || null
       ]
     );
 
     const purchaseId = result.insertId;
-    let isLinkedToReceipt = !!grn_id;
+    let isLinkedToReceipt = !!grn_id || !!purchase_order_id;
 
-    if (!isLinkedToReceipt && purchase_order_id) {
-      const [existingGrn] = await connection.query(
-        'SELECT id FROM grns WHERE purchase_order_id = ? LIMIT 1',
-        [purchase_order_id]
-      );
+    // Check if PO or GRN exists for this vendor
+    if (!isLinkedToReceipt) {
+      const [existingGrn] = await connection.query('SELECT id FROM grns WHERE vendor_id = ? ORDER BY id DESC LIMIT 1', [vendor_id]);
       if (existingGrn.length > 0) {
         isLinkedToReceipt = true;
         await connection.query('UPDATE purchases SET grn_id = ? WHERE id = ?', [existingGrn[0].id, purchaseId]);
@@ -1122,7 +1130,8 @@ export const createPurchase = async (req, res, next) => {
 
     // Loop items to save & update stock
     for (const item of items) {
-      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [item.product_id]);
+      const targetProductId = Number(item.product_id || item.productId);
+      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [targetProductId]);
       const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
       const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
       const defaultProdPurchasePrice = prod ? Number(prod.purchase_price || 0) : 0;
@@ -1130,11 +1139,14 @@ export const createPurchase = async (req, res, next) => {
       const itemMrp = Number(item.mrp || item.max_retail_price || defaultProdMrp);
       const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
       const itemPurchasePrice = item.purchase_price && Number(item.purchase_price) > 0 ? Number(item.purchase_price) : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice);
+      const itemGst = Number(item.gst || item.gst_rate || 0);
+      const itemQty = Number(item.quantity || 0);
+      const itemTotal = Number(item.total || (itemQty * itemPurchasePrice));
 
       await connection.query(
         `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [purchaseId, item.product_id, item.quantity, itemPurchasePrice, itemMrp, item.gst, item.total]
+        [purchaseId, targetProductId, itemQty, itemPurchasePrice, itemMrp, itemGst, itemTotal]
       );
 
       if (!isLinkedToReceipt) {
@@ -1143,10 +1155,10 @@ export const createPurchase = async (req, res, next) => {
           `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, supplier_id, warehouse_id, purchase_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            item.product_id,
+            targetProductId,
             item.batch_number || item.batch_no || `BATCH-${Date.now()}`,
-            item.quantity,
-            item.quantity,
+            itemQty,
+            itemQty,
             date,
             parseToISODate(item.expiry_date || item.expDate),
             itemPurchasePrice,

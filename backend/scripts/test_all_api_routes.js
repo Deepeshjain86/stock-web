@@ -15,7 +15,7 @@ const testAllApiRoutes = async () => {
     const saLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'superadmin@kiranamart.com', password: 'Pass123!' })
+      body: JSON.stringify({ email: 'superadmin@kiranamart.com', password: 'superadminpassword' })
     });
 
     const saBody = await saLoginRes.json();

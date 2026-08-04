@@ -217,26 +217,24 @@ export const createSale = async (req, res, next) => {
   try {
     await connection.beginTransaction();
 
-    const {
-      customerId = 1,
-      customerType = 'Walk-in',
-      customerName = '',
-      customerPhone = '',
-      dueDate,
-      amountPaid = 0,
-      warehouseId = 1,
-      date,
-      subtotal,
-      discount,
-      gstAmount,
-      total,
-      paymentStatus = 'Paid',
-      paymentMethod = 'Cash',
-      payments = [],
-      items
-    } = req.body;
+    const customerId = req.body.customerId || req.body.customer_id || 1;
+    const customerType = req.body.customerType || req.body.customer_type || 'Walk-in';
+    const customerName = req.body.customerName || req.body.customer_name || '';
+    const customerPhone = req.body.customerPhone || req.body.customer_phone || '';
+    const dueDate = req.body.dueDate || req.body.due_date;
+    const amountPaid = req.body.amountPaid || req.body.amount_paid || req.body.paid_amount || 0;
+    const warehouseId = req.body.warehouseId || req.body.warehouse_id || 1;
+    const date = req.body.date || req.body.sale_date || new Date().toISOString().split('T')[0];
+    const subtotal = req.body.subtotal || 0;
+    const discount = req.body.discount || 0;
+    const gstAmount = req.body.gstAmount || req.body.gst_amount || 0;
+    const total = req.body.total || 0;
+    const paymentStatus = req.body.paymentStatus || req.body.payment_status || 'Paid';
+    const paymentMethod = req.body.paymentMethod || req.body.payment_method || req.body.payment_type || 'Cash';
+    const payments = req.body.payments || [];
+    const items = req.body.items;
 
-    if (!items || items.length === 0 || !date) {
+    if (!items || items.length === 0) {
       await connection.rollback();
       connection.release();
       return res.status(400).json({ success: false, message: 'Missing billing details or products list' });
@@ -358,6 +356,36 @@ export const createSale = async (req, res, next) => {
 
     let amtPaid = Math.min(Number(total || 0), nonCreditPaymentsSum > 0 ? nonCreditPaymentsSum : Number(amountPaid || 0));
     let dueAmt = creditPaymentsSum > 0 ? creditPaymentsSum : Math.max(0, Number(total || 0) - amtPaid);
+
+    // ── AUTOMATIC ADVANCE CREDIT (JAMA BALANCE) DEDUCTION ──────────────────────
+    let advanceCreditApplied = 0;
+    if (finalCustomerId && finalCustomerId !== 1) {
+      const [custRows] = await connection.query('SELECT advance_balance FROM customers WHERE id = ?', [finalCustomerId]);
+      const currentAdvance = Number(custRows[0]?.advance_balance || 0);
+
+      if (currentAdvance > 0) {
+        const billTotal = Number(total || 0);
+        advanceCreditApplied = Math.min(billTotal, currentAdvance);
+
+        if (advanceCreditApplied > 0) {
+          // Subtract from customer advance credit balance
+          await connection.query(
+            'UPDATE customers SET advance_balance = GREATEST(0, COALESCE(advance_balance, 0) - ?) WHERE id = ?',
+            [advanceCreditApplied, finalCustomerId]
+          );
+
+          // Record Advance Redemption in borrow_records
+          await connection.query(
+            `INSERT INTO borrow_records (customer_id, amount, type, date, notes) VALUES (?, ?, 'Advance Redemption', NOW(), ?)`,
+            [finalCustomerId, advanceCreditApplied, `Automatic Advance Credit (Jama) adjustment of ₹${advanceCreditApplied} applied against Invoice ${invoiceNo}`]
+          );
+
+          // Adjust payment amounts
+          amtPaid = Math.min(billTotal, amtPaid + advanceCreditApplied);
+          dueAmt = Math.max(0, billTotal - amtPaid);
+        }
+      }
+    }
 
     let calculatedPaymentStatus = paymentStatus;
     if (dueAmt > 0 && amtPaid > 0) {

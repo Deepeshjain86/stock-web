@@ -11,11 +11,12 @@ export const getBorrowSummary = async (req, res, next) => {
 
     let query = `
       SELECT c.id, c.customer_code, c.name, c.phone, c.email, c.address, c.customer_type, c.status,
+             COALESCE(c.advance_balance, 0) as advance_balance,
              COALESCE(SUM(bt.remaining_amount), 0) as balance,
              COALESCE(SUM(CASE WHEN bt.payment_status = 'Overdue' OR (bt.payment_status != 'Paid' AND bt.due_date < CURRENT_DATE()) THEN bt.remaining_amount ELSE 0 END), 0) as overdue_balance
       FROM customers c
       LEFT JOIN borrow_transactions bt ON c.id = bt.customer_id
-      WHERE (c.customer_type = 'Borrow' OR c.id IN (SELECT DISTINCT customer_id FROM borrow_transactions))
+      WHERE (c.customer_type = 'Borrow' OR c.id IN (SELECT DISTINCT customer_id FROM borrow_transactions) OR COALESCE(c.advance_balance, 0) > 0)
         AND c.name != 'Walk-in Customer'
     `;
     const queryParams = [];
@@ -32,18 +33,16 @@ export const getBorrowSummary = async (req, res, next) => {
 
     const [totals] = await req.db.query(`
       SELECT 
-        COALESCE(SUM(bt.remaining_amount), 0) as total_pending,
-        COALESCE(SUM(CASE WHEN bt.payment_status != 'Paid' AND bt.due_date < CURRENT_DATE() THEN bt.remaining_amount ELSE 0 END), 0) as total_overdue
-      FROM borrow_transactions bt
-      JOIN customers c ON bt.customer_id = c.id
-      WHERE c.name != 'Walk-in Customer'
+        COALESCE((SELECT SUM(bt.remaining_amount) FROM borrow_transactions bt JOIN customers c ON bt.customer_id = c.id WHERE c.name != 'Walk-in Customer'), 0) as total_pending,
+        COALESCE((SELECT SUM(bt.remaining_amount) FROM borrow_transactions bt JOIN customers c ON bt.customer_id = c.id WHERE c.name != 'Walk-in Customer' AND bt.payment_status != 'Paid' AND bt.due_date < CURRENT_DATE()), 0) as total_overdue,
+        COALESCE((SELECT SUM(advance_balance) FROM customers WHERE name != 'Walk-in Customer'), 0) as total_advance_credit
     `);
 
     return res.status(200).json({ 
       success: true, 
       count: summary.length, 
       summary,
-      summaryTotals: totals[0] || { total_pending: 0, total_overdue: 0 }
+      summaryTotals: totals[0] || { total_pending: 0, total_overdue: 0, total_advance_credit: 0 }
     });
   } catch (error) {
     next(error);
