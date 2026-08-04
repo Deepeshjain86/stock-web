@@ -14,7 +14,7 @@ export const getStockSummary = async (req, res, next) => {
              COALESCE(w.name, 'Main Storage') as warehouse_name, 
              COALESCE(SUM(s.quantity), 0) as quantity,
              COALESCE(
-               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
+               (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0)) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
                (GREATEST(0, COALESCE(SUM(s.quantity), 0)) * COALESCE(p.purchase_price, 0))
              ) as stock_valuation
       FROM products p

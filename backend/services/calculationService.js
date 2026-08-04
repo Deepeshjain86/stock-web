@@ -100,7 +100,7 @@ const formatWhereClause = (tablePrefix = 's', filters = {}) => {
  */
 export const calculateInventoryValuation = async (db, filters = {}) => {
   let batchQuery = `
-    SELECT COALESCE(SUM(pb.remaining_quantity * pb.purchase_price), 0) as batch_valuation
+    SELECT COALESCE(SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = p.id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1), 0)), 0) as batch_valuation
     FROM purchase_batches pb
     JOIN products p ON pb.product_id = p.id
     WHERE pb.remaining_quantity > 0
@@ -124,7 +124,7 @@ export const calculateInventoryValuation = async (db, filters = {}) => {
 
   // Fallback for stock items without active purchase_batches records
   let fallbackQuery = `
-    SELECT COALESCE(SUM(GREATEST(0, s.quantity) * COALESCE(p.purchase_price, 0)), 0) as fallback_valuation
+    SELECT COALESCE(SUM(GREATEST(0, s.quantity) * COALESCE(NULLIF(p.purchase_price, 0), (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = p.id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1), 0)), 0) as fallback_valuation
     FROM stock s
     JOIN products p ON s.product_id = p.id
     WHERE s.quantity > 0
@@ -273,8 +273,9 @@ export const calculateCOGS = async (db, filters = {}) => {
     SELECT COALESCE(SUM(
       (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
       COALESCE(
-        (SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number LIMIT 1),
-        p.purchase_price,
+        NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+        NULLIF(p.purchase_price, 0),
+        (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
         0
       )
     ), 0) as cogs
@@ -585,15 +586,15 @@ export const calculateStockAging = async (db, filters = {}) => {
   try {
     let query = `
       SELECT 
-        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) <= 30 THEN pb.remaining_quantity * pb.purchase_price ELSE 0 END) as val_0_30,
+        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) <= 30 THEN pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0) ELSE 0 END) as val_0_30,
         SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) <= 30 THEN pb.remaining_quantity ELSE 0 END) as qty_0_30,
-        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) BETWEEN 31 AND 60 THEN pb.remaining_quantity * pb.purchase_price ELSE 0 END) as val_31_60,
+        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) BETWEEN 31 AND 60 THEN pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0) ELSE 0 END) as val_31_60,
         SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) BETWEEN 31 AND 60 THEN pb.remaining_quantity ELSE 0 END) as qty_31_60,
-        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) BETWEEN 61 AND 90 THEN pb.remaining_quantity * pb.purchase_price ELSE 0 END) as val_61_90,
+        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) BETWEEN 61 AND 90 THEN pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0) ELSE 0 END) as val_61_90,
         SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) BETWEEN 61 AND 90 THEN pb.remaining_quantity ELSE 0 END) as qty_61_90,
-        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) > 90 THEN pb.remaining_quantity * pb.purchase_price ELSE 0 END) as val_90_plus,
+        SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) > 90 THEN pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0) ELSE 0 END) as val_90_plus,
         SUM(CASE WHEN DATEDIFF(CURRENT_DATE(), pb.purchase_date) > 90 THEN pb.remaining_quantity ELSE 0 END) as qty_90_plus,
-        COALESCE(SUM(pb.remaining_quantity * pb.purchase_price), 0) as total_valuation,
+        COALESCE(SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0)), 0) as total_valuation,
         COALESCE(SUM(pb.remaining_quantity), 0) as total_qty
       FROM purchase_batches pb
       JOIN products p ON pb.product_id = p.id
@@ -687,7 +688,7 @@ export const calculateABCAnalysis = async (db, filters = {}) => {
     const [rows] = await db.query(`
       SELECT p.id, p.name, p.barcode, c.name as category,
              COALESCE(SUM(s.quantity), 0) as stock_level,
-             COALESCE((SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0), COALESCE(SUM(s.quantity * p.purchase_price), 0)) as valuation,
+             COALESCE((SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0)) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0), COALESCE(SUM(s.quantity * p.purchase_price), 0)) as valuation,
              COALESCE((SELECT SUM(si.total) FROM sale_items si JOIN sales sa ON si.sale_id = sa.id WHERE si.product_id = p.id), 0) as revenue
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id

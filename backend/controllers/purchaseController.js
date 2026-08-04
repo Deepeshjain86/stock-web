@@ -1122,17 +1122,19 @@ export const createPurchase = async (req, res, next) => {
 
     // Loop items to save & update stock
     for (const item of items) {
-      const [[prod]] = await connection.query('SELECT mrp, selling_price FROM products WHERE id = ?', [item.product_id]);
+      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [item.product_id]);
       const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
       const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
+      const defaultProdPurchasePrice = prod ? Number(prod.purchase_price || 0) : 0;
 
       const itemMrp = Number(item.mrp || item.max_retail_price || defaultProdMrp);
       const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
+      const itemPurchasePrice = item.purchase_price && Number(item.purchase_price) > 0 ? Number(item.purchase_price) : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice);
 
       await connection.query(
         `INSERT INTO purchase_items (purchase_id, product_id, quantity, purchase_price, mrp, gst, total)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [purchaseId, item.product_id, item.quantity, item.purchase_price, itemMrp, item.gst, item.total]
+        [purchaseId, item.product_id, item.quantity, itemPurchasePrice, itemMrp, item.gst, item.total]
       );
 
       if (!isLinkedToReceipt) {
@@ -1147,7 +1149,7 @@ export const createPurchase = async (req, res, next) => {
             item.quantity,
             date,
             parseToISODate(item.expiry_date || item.expDate),
-            item.purchase_price || 0,
+            itemPurchasePrice,
             itemMrp,
             itemSellingPrice,
             vendor_id,
@@ -1704,18 +1706,20 @@ export const createGRN = async (req, res, next) => {
       }
 
       if (qtyRec > 0 && !purchaseAlreadyAddedStock) {
-        const [[prod]] = await connection.query('SELECT mrp, selling_price FROM products WHERE id = ?', [productId]);
+        const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [productId]);
         const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
         const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
+        const defaultProdPurchasePrice = prod ? Number(prod.purchase_price || 0) : 0;
 
         const itemMrp = item.mrp && Number(item.mrp) > 0 ? Number(item.mrp) : (item.max_retail_price && Number(item.max_retail_price) > 0 ? Number(item.max_retail_price) : defaultProdMrp);
         const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
+        const itemPurchasePrice = item.purchase_price && Number(item.purchase_price) > 0 ? Number(item.purchase_price) : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice);
 
         // Create dedicated batch record in purchase_batches for FIFO inventory management
         await connection.query(
           `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, supplier_id, warehouse_id, grn_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [productId, item.batch_number || `BATCH-${Date.now()}`, qtyRec, qtyRec, date, formattedExpiry, item.unit_price || 0, itemMrp, itemSellingPrice, vendor_id, warehouse_id, grnId]
+          [productId, item.batch_number || `BATCH-${Date.now()}`, qtyRec, qtyRec, date, formattedExpiry, itemPurchasePrice, itemMrp, itemSellingPrice, vendor_id, warehouse_id, grnId]
         );
 
         // Update Stock levels

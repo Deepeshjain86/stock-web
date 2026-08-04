@@ -62,6 +62,35 @@ export const runCategorySchemaMigrations = async (pool) => {
       console.warn('[Schema Migration] sale_payments table check:', e.message);
     }
 
+    // 4a. Ensure customers table has notes, opening_balance, credit_limit, outstanding_balance, payment_mode, etc.
+    try {
+      const [custCols] = await pool.query('DESCRIBE customers');
+      const custColNames = custCols.map(c => c.Field);
+      if (!custColNames.includes('customer_code')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN customer_code VARCHAR(50) NULL AFTER id');
+      }
+      if (!custColNames.includes('notes')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN notes TEXT NULL AFTER address');
+      }
+      if (!custColNames.includes('opening_balance')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN opening_balance DECIMAL(12,2) DEFAULT 0.00 AFTER notes');
+      }
+      if (!custColNames.includes('credit_limit')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN credit_limit DECIMAL(12,2) DEFAULT 0.00 AFTER opening_balance');
+      }
+      if (!custColNames.includes('outstanding_balance')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN outstanding_balance DECIMAL(12,2) DEFAULT 0.00 AFTER credit_limit');
+      }
+      if (!custColNames.includes('payment_mode')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN payment_mode VARCHAR(50) DEFAULT "Cash" AFTER status');
+      }
+      if (!custColNames.includes('expires_at')) {
+        await pool.query('ALTER TABLE customers ADD COLUMN expires_at DATETIME NULL AFTER updated_by');
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] customers table check:', e.message);
+    }
+
     // 4b. Per-user notification state for non-admin staff.
     // Admin continues to use notifications.is_read/delete directly.
     await pool.query(`
@@ -217,6 +246,31 @@ export const runCategorySchemaMigrations = async (pool) => {
       await pool.query('ALTER TABLE grn_items MODIFY COLUMN quantity_received DECIMAL(12,3) NOT NULL DEFAULT 0.000, MODIFY COLUMN quantity_damaged DECIMAL(12,3) NOT NULL DEFAULT 0.000, MODIFY COLUMN quantity_rejected DECIMAL(12,3) NOT NULL DEFAULT 0.000');
     } catch (e) {
       console.warn('[Schema Migration] DECIMAL quantity column modify check:', e.message);
+    }
+
+    // ── AUTO-REPAIR PURCHASE_BATCHES WITH ZERO PURCHASE_PRICE OR MISSING PRICES ──
+    try {
+      await pool.query(`
+        UPDATE purchase_batches pb
+        JOIN purchase_items pi ON (pb.purchase_id = pi.purchase_id OR pb.grn_id = pi.purchase_id) AND pb.product_id = pi.product_id
+        SET pb.purchase_price = pi.purchase_price
+        WHERE pb.purchase_price = 0 AND pi.purchase_price > 0
+      `);
+      await pool.query(`
+        UPDATE purchase_batches pb
+        JOIN products p ON pb.product_id = p.id
+        SET pb.purchase_price = p.purchase_price
+        WHERE pb.purchase_price = 0 AND p.purchase_price > 0
+      `);
+      await pool.query(`
+        UPDATE purchase_batches pb
+        JOIN products p ON pb.product_id = p.id
+        SET pb.mrp = IF(pb.mrp = 0 AND p.mrp > 0, p.mrp, pb.mrp),
+            pb.selling_price = IF(pb.selling_price = 0 AND p.selling_price > 0, p.selling_price, pb.selling_price)
+        WHERE (pb.mrp = 0 AND p.mrp > 0) OR (pb.selling_price = 0 AND p.selling_price > 0)
+      `);
+    } catch (e) {
+      console.warn('[Schema Migration] Batch data repair check:', e.message);
     }
   } catch (err) {
     console.error('[Schema Migration] Category schema migration notice:', err.message);

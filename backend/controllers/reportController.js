@@ -56,7 +56,7 @@ export const getDashboardKPIs = async (req, res, next) => {
     const [categoryDist] = await req.db.query(`
       SELECT c.name as name, COUNT(p.id) as value,
              COALESCE(
-               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) 
+               (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr2.purchase_price, 0), 0)) 
                 FROM purchase_batches pb 
                 JOIN products pr2 ON pb.product_id = pr2.id 
                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
@@ -109,7 +109,15 @@ export const getDashboardCharts = async (req, res, next) => {
     // Calculate monthly COGS for real profit computation
     const [monthlyCogs] = await req.db.query(`
       SELECT DATE_FORMAT(s.date, '%b %Y') as month,
-             COALESCE(SUM((si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) * pr.purchase_price), 0) as cogs
+             COALESCE(SUM(
+               (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
+               COALESCE(
+                 NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+                 NULLIF(pr.purchase_price, 0),
+                 (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
+                 0
+               )
+             ), 0) as cogs
       FROM sale_items si
       JOIN sales s ON si.sale_id = s.id
       JOIN products pr ON si.product_id = pr.id
@@ -138,7 +146,7 @@ export const getDashboardCharts = async (req, res, next) => {
     const [categoryDist] = await req.db.query(`
       SELECT c.name as name, COUNT(p.id) as value,
              COALESCE(
-               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) 
+               (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr2.purchase_price, 0), 0)) 
                 FROM purchase_batches pb 
                 JOIN products pr2 ON pb.product_id = pr2.id 
                 WHERE pr2.category_id = c.id AND pb.remaining_quantity > 0),
@@ -210,7 +218,7 @@ export const getInventoryReport = async (req, res, next) => {
                COALESCE(SUM(s.quantity), 0)
              ) as stock_level,
              COALESCE(
-               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
+               (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(p.purchase_price, 0), 0)) FROM purchase_batches pb WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
                GREATEST(0, COALESCE(SUM(s.quantity), 0) * COALESCE(p.purchase_price, 0))
              ) as valuation
       FROM products p
@@ -348,7 +356,13 @@ export const getSalesDashboardData = async (req, res, next) => {
     );
     const [todayCogsResult] = await req.db.query(
       `SELECT COALESCE(SUM(
-        (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) * p.purchase_price
+        (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
+        COALESCE(
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+          NULLIF(p.purchase_price, 0),
+          (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
+          0
+        )
        ), 0) as cogs 
        FROM sale_items si 
        JOIN sales s ON si.sale_id = s.id 
@@ -375,7 +389,13 @@ export const getSalesDashboardData = async (req, res, next) => {
     );
     const [currentMonthCogsResult] = await req.db.query(
       `SELECT COALESCE(SUM(
-        (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) * p.purchase_price
+        (si.quantity - COALESCE((SELECT SUM(quantity) FROM sales_returns WHERE sale_id = si.sale_id AND product_id = si.product_id), 0)) *
+        COALESCE(
+          NULLIF((SELECT pb.purchase_price FROM purchase_batches pb WHERE pb.product_id = si.product_id AND pb.batch_number = si.batch_number AND pb.purchase_price > 0 LIMIT 1), 0),
+          NULLIF(p.purchase_price, 0),
+          (SELECT NULLIF(pi.purchase_price, 0) FROM purchase_items pi WHERE pi.product_id = si.product_id AND pi.purchase_price > 0 ORDER BY pi.id DESC LIMIT 1),
+          0
+        )
        ), 0) as cogs 
        FROM sale_items si 
        JOIN sales s ON si.sale_id = s.id 
@@ -582,7 +602,7 @@ export const getVendorInventoryReport = async (req, res, next) => {
              pr.id as product_id, pr.name as product_name, pr.barcode, pr.unit,
              COALESCE(SUM(s.quantity), 0) as stock_level, 
              COALESCE(
-               (SELECT SUM(pb.remaining_quantity * pb.purchase_price) FROM purchase_batches pb WHERE pb.product_id = pr.id AND pb.supplier_id = v.id AND pb.remaining_quantity > 0),
+               (SELECT SUM(pb.remaining_quantity * COALESCE(NULLIF(pb.purchase_price, 0), NULLIF(pr.purchase_price, 0), 0)) FROM purchase_batches pb WHERE pb.product_id = pr.id AND pb.supplier_id = v.id AND pb.remaining_quantity > 0),
                COALESCE(SUM(s.quantity * pr.purchase_price), 0)
              ) as valuation
       FROM vendors v
