@@ -433,6 +433,22 @@ const Header = ({ onOpenShortcuts }) => {
                 <span className="text-[11px] font-medium text-slate-400 mt-0.5">{dateStr}</span>
               </div>
 
+              {/* Subscription Plan Status Badge */}
+              {user?.role !== 'Super Admin' && (
+                <button
+                  onClick={() => navigate('/dashboard/billing')}
+                  title="Manage Store Subscription Plan"
+                  className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all border shadow-2xs cursor-pointer active:scale-95 ${
+                    user?.subscription_status === 'Expired'
+                      ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-300 animate-pulse'
+                      : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300'
+                  }`}
+                >
+                  <CreditCardIcon className="w-4 h-4 stroke-[2.5]" />
+                  <span>{user?.subscription_status === 'Expired' ? 'Expired — Upgrade Plan' : 'SaaS Plan'}</span>
+                </button>
+              )}
+
               {/* Keyboard Shortcuts Trigger */}
               <button
                 onClick={onOpenShortcuts}

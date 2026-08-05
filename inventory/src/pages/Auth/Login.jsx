@@ -43,6 +43,8 @@ const Login = () => {
       const user = resultAction.payload.user;
       if (user.role === 'Super Admin') {
         navigate('/superadmin', { replace: true });
+      } else if (user.subscription_status === 'Expired' || (user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date())) {
+        navigate('/dashboard/billing', { replace: true, state: { expired: true } });
       } else {
         navigate(from === '/' ? '/dashboard' : from, { replace: true });
       }
@@ -109,10 +111,12 @@ const Login = () => {
               <input
                 type="text"
                 required
+                name="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@kiranamart.com or user ID"
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none rounded-xl text-xs font-bold text-slate-800 dark:text-white placeholder-slate-400 transition-all"
+                autoComplete="username email"
+                placeholder="Enter email or Admin ID (e.g. MOHAN001)"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none rounded-xl text-xs font-bold text-slate-800 dark:text-white placeholder:text-slate-400 placeholder:font-medium transition-all"
               />
             </div>
           </div>
@@ -137,10 +141,12 @@ const Login = () => {
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
+                name="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none rounded-xl text-xs font-bold text-slate-800 dark:text-white placeholder-slate-400 transition-all"
+                autoComplete="current-password"
+                placeholder="Enter security password"
+                className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none rounded-xl text-xs font-bold text-slate-800 dark:text-white placeholder:text-slate-400 placeholder:font-medium transition-all"
               />
               <button
                 type="button"
@@ -186,7 +192,19 @@ const Login = () => {
           </button>
         </form>
 
-        <div className="text-center mt-6 text-[10px] font-bold text-slate-400 dark:text-slate-500">
+        <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+            Want to use Kirana ERP for your grocery store?
+          </p>
+          <Link
+            to="/register"
+            className="inline-flex items-center gap-1.5 mt-1.5 text-xs font-black text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 transition-colors"
+          >
+            Start Free 7-Day Trial & Register Store &rarr;
+          </Link>
+        </div>
+
+        <div className="text-center mt-4 text-[10px] font-bold text-slate-400 dark:text-slate-500">
           Stock Management v1.0.0 © 2026. All permissions encrypted.
         </div>
       </motion.div>

@@ -72,6 +72,10 @@ export const authAPI = {
     const response = await API.post('/auth/login', credentials);
     return response.data;
   },
+  registerStore: async (data) => {
+    const response = await API.post('/auth/register-store', data);
+    return response.data;
+  },
   logout: async () => {
     const response = await API.post('/auth/logout');
     return response.data;

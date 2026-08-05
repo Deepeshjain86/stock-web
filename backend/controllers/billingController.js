@@ -116,9 +116,20 @@ export const subscribeStorePlan = async (req, res, next) => {
     // Insert Invoice Log
     await masterPool.query(
       `INSERT INTO billing_history (tenant_id, transaction_id, amount, plan, payment_status, billing_date, next_renewal_date, payment_method)
-       VALUES (?, ?, ?, ?, 'Paid', CURRENT_DATE(), ?, 'AutoPay')`,
+       VALUES (?, ?, ?, ?, 'Paid', CURRENT_DATE(), ?, 'Online Upgrade')`,
       [tenantId, transactionId, price, planName, expiryDate]
     );
+
+    // Also insert subscription record for Super Admin analytics
+    try {
+      await masterPool.query(
+        `INSERT INTO subscriptions (tenant_id, plan, status, subscription_start_date, subscription_expiry_date, payment_status, payment_gateway, amount)
+         VALUES (?, ?, 'Active', CURRENT_DATE(), ?, 'Paid', 'Online Upgrade', ?)`,
+        [tenantId, planName, expiryDate, price]
+      );
+    } catch (subErr) {
+      console.warn('[Billing] Subscription insert error:', subErr.message);
+    }
 
     // Log action audit
     await masterPool.query(

@@ -24,10 +24,17 @@ const ProtectedRoute = ({ allowedRoles, children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  // Redirect expired SaaS subscription tenants/users to billing portal
-  if (user && user.role !== 'Super Admin' && user.subscription_status === 'Expired') {
+  // Comprehensive Expiry Guard: Redirect expired SaaS subscription or ended trial tenants to billing portal
+  const isExpired = user && user.role !== 'Super Admin' && (
+    user.subscription_status === 'Expired' ||
+    user.subscription_status === 'Deactivated' ||
+    (user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date()) ||
+    (user.trial_ended_at && user.subscription_status === 'Trial' && new Date(user.trial_ended_at) < new Date())
+  );
+
+  if (isExpired) {
     const path = window.location.pathname;
-    const isAllowedPath = path.includes('/billing') || path.includes('/settings') || path.includes('/logout');
+    const isAllowedPath = path.includes('/billing') || path.includes('/logout');
     if (!isAllowedPath) {
       return <Navigate to="/dashboard/billing" replace state={{ expired: true }} />;
     }

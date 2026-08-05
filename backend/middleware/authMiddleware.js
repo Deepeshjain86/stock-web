@@ -65,18 +65,35 @@ export const protect = async (req, res, next) => {
     } else {
       // Query local tenant database for Admin / Employee profile
       db = getTenantPool(tenantDbName);
-      const [users] = await db.query(
+      let [tenantUsers] = await db.query(
         `SELECT u.id, u.name, u.email, u.status, u.role_id, u.department, r.name as role 
          FROM users u 
          JOIN roles r ON u.role_id = r.id 
-         WHERE u.email = ?`,
-        [decoded.email]
+         WHERE LOWER(u.email) = LOWER(?) OR UPPER(u.login_id) = UPPER(?)`,
+        [decoded.email, decoded.email]
       );
 
-      if (users.length === 0) {
-        return res.status(401).json({ success: false, message: 'User profile no longer exists in store database' });
+      if (tenantUsers.length === 0) {
+        // Fallback to master pool for global store admin user profile
+        const [masterUsers] = await masterPool.query(
+          `SELECT id, email, role, status, login_id FROM users WHERE LOWER(email) = LOWER(?) OR UPPER(login_id) = UPPER(?)`,
+          [decoded.email, decoded.email]
+        );
+        if (masterUsers.length > 0) {
+          user = {
+            id: masterUsers[0].id,
+            name: decoded.email.split('@')[0],
+            email: masterUsers[0].email,
+            status: masterUsers[0].status,
+            role: masterUsers[0].role
+          };
+        } else {
+          return res.status(401).json({ success: false, message: 'User profile no longer exists in store database' });
+        }
+      } else {
+        user = tenantUsers[0];
       }
-      user = users[0];
+    }
 
       // Fetch user's permissions array
       try {
@@ -92,7 +109,6 @@ export const protect = async (req, res, next) => {
       } catch (pe) {
         user.permissions = [];
       }
-    }
 
     if (user.status !== 'Active') {
       return res.status(403).json({ success: false, message: 'Your account is suspended. Contact Administrator.' });

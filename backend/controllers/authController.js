@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { masterPool, getTenantPool } from '../config/tenantDb.js';
+import { masterPool, getTenantPool, ensureTenantMigrations } from '../config/tenantDb.js';
 import { createNotification } from '../services/notificationService.js';
+import { provisionTenantDatabase } from '../services/tenantProvisioner.js';
 
 // Helper to generate JWT token
 const generateToken = (id, email, role, tenantId, tenantDbName) => {
@@ -638,5 +639,156 @@ export const logout = async (req, res, next) => {
     return res.status(200).json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Self-Service Merchant Store Registration (Public Signup)
+// @route   POST /api/auth/register-store
+// @access  Public
+export const registerStore = async (req, res, next) => {
+  const masterConn = await masterPool.getConnection();
+  try {
+    await masterConn.beginTransaction();
+
+    const {
+      store_name,
+      owner_name,
+      email,
+      password,
+      phone,
+      address,
+      gstin
+    } = req.body;
+
+    if (!store_name || !owner_name || !email || !password) {
+      masterConn.release();
+      return res.status(400).json({ success: false, message: 'Required fields: Store Name, Owner Name, Email, and Password' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPassword = String(password).trim();
+    const cleanOwner = String(owner_name).trim();
+    const cleanStore = String(store_name).trim();
+    const cleanPhone = phone ? String(phone).trim() : null;
+
+    if (cleanPassword.length < 6) {
+      masterConn.release();
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long' });
+    }
+
+    // Verify email uniqueness globally in Master DB
+    const [dupUser] = await masterConn.query('SELECT id FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+    if (dupUser.length > 0) {
+      masterConn.release();
+      return res.status(400).json({ success: false, message: 'Email address is already registered. Please login instead.' });
+    }
+
+    const [dupTenant] = await masterConn.query('SELECT id FROM tenants WHERE LOWER(email) = ?', [cleanEmail]);
+    if (dupTenant.length > 0) {
+      masterConn.release();
+      return res.status(400).json({ success: false, message: 'Email address is already registered. Please login instead.' });
+    }
+
+    // Auto-generate Admin ID prefix (e.g. RADHE001)
+    let basePrefix = cleanOwner.split(' ')[0].toUpperCase().replace(/[^A-Z]/g, '');
+    if (!basePrefix || basePrefix.length < 2) basePrefix = 'STORE';
+
+    const [existingAdmins] = await masterConn.query(
+      'SELECT login_id FROM users WHERE UPPER(login_id) LIKE ?',
+      [`${basePrefix}%`]
+    );
+
+    let maxSeq = 0;
+    for (const r of existingAdmins) {
+      const logId = String(r.login_id || '').toUpperCase();
+      const numMatch = logId.match(new RegExp(`^${basePrefix}(\\d+)$`));
+      if (numMatch && numMatch[1]) {
+        const seqNum = parseInt(numMatch[1], 10);
+        if (!isNaN(seqNum) && seqNum > maxSeq) maxSeq = seqNum;
+      }
+    }
+
+    const sanitizedAdminId = `${basePrefix}${String(maxSeq + 1).padStart(3, '0')}`;
+    const dbName = `shop_${sanitizedAdminId.toLowerCase()}`;
+
+    const randUuid = 'TENT-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+
+    const trialStart = new Date();
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 7);
+
+    // Insert tenant record
+    const [tenantResult] = await masterConn.query(
+      `INSERT INTO tenants 
+        (tenant_uuid, store_name, owner_name, email, phone, address, gstin, subscription_status, subscription_plan, subscription_expires_at, trial_started_at, trial_ended_at, trial_used, database_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'Trial', 'Trial', ?, ?, ?, TRUE, ?)`,
+      [
+        randUuid, cleanStore, cleanOwner, cleanEmail, cleanPhone, address || null, gstin || null,
+        trialEnd, trialStart, trialEnd, dbName
+      ]
+    );
+
+    const tenantId = tenantResult.insertId;
+
+    // Hash password and insert Admin user into master users table
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(cleanPassword, salt);
+
+    const [userResult] = await masterConn.query(
+      `INSERT INTO users (tenant_id, email, login_id, password, role, status)
+       VALUES (?, ?, ?, ?, 'Admin', 'Active')`,
+      [tenantId, cleanEmail, sanitizedAdminId, passwordHash]
+    );
+
+    const userId = userResult.insertId;
+
+    // Provision the store database, tables, and default data synchronously
+    try {
+      await provisionTenantDatabase(tenantId, dbName, cleanStore, cleanOwner, cleanEmail, cleanPassword, sanitizedAdminId);
+      await ensureTenantMigrations(dbName);
+    } catch (provErr) {
+      console.error('[RegisterStore] Database provisioning error:', provErr);
+    }
+
+    await masterConn.commit();
+
+    // Generate JWT token for instant auto-login
+    const token = generateToken(userId, cleanEmail, 'Admin', tenantId, dbName);
+
+    await createNotification({
+      type: 'New Store Registered',
+      title: '🆕 New Merchant Store Registered',
+      message: `Merchant "${cleanStore}" (${cleanOwner}) registered for 7-Day Free Trial.`,
+      priority: 'High',
+      related_user: cleanEmail,
+      related_module: 'Auth',
+      target_roles: 'Super Admin',
+      isMaster: true
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Store registered successfully! Welcome to Kirana ERP 🚀',
+      token,
+      user: {
+        id: userId,
+        email: cleanEmail,
+        name: cleanOwner,
+        role: 'Admin',
+        tenantId,
+        tenantDbName: dbName,
+        store_name: cleanStore,
+        login_id: sanitizedAdminId,
+        subscription_status: 'Trial',
+        subscription_plan: 'Trial',
+        trial_ended_at: trialEnd
+      }
+    });
+
+  } catch (error) {
+    await masterConn.rollback();
+    next(error);
+  } finally {
+    masterConn.release();
   }
 };

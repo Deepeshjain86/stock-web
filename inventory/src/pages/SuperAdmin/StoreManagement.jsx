@@ -247,9 +247,17 @@ const StoreManagement = () => {
     }
   };
 
-  const remainingDays = (expiresAt) => {
-    if (!expiresAt) return 0;
-    const expiry = new Date(expiresAt);
+  const remainingDays = (storeOrExpiresAt) => {
+    if (!storeOrExpiresAt) return 0;
+    if (typeof storeOrExpiresAt === 'object') {
+      if (storeOrExpiresAt.subscription_status === 'Expired' || storeOrExpiresAt.subscription_status === 'Inactive') return 0;
+      const expiresAt = storeOrExpiresAt.subscription_expires_at || storeOrExpiresAt.trial_ended_at;
+      if (!expiresAt) return 0;
+      const expiry = new Date(expiresAt);
+      const diffTime = expiry - new Date();
+      return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    }
+    const expiry = new Date(storeOrExpiresAt);
     const diffTime = expiry - new Date();
     return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   };
@@ -339,11 +347,11 @@ const StoreManagement = () => {
                         </td>
                         <td className="py-3.5 font-bold">
                           <span className={`px-2.5 py-1 rounded-xl text-xs ${
-                            remainingDays(store.subscription_expires_at) <= 3 
+                            store.subscription_status === 'Expired' || remainingDays(store) <= 3 
                               ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/20' 
                               : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20'
                           }`}>
-                            {remainingDays(store.subscription_expires_at)} Days
+                            {remainingDays(store)} Days
                           </span>
                         </td>
                         <td className="py-3.5">

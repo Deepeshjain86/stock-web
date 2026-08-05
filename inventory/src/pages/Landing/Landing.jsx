@@ -123,8 +123,16 @@ const Landing = () => {
           <ThemeToggle />
 
           <Link
+            to="/register"
+            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/20 active:scale-95 transition-all"
+          >
+            <SparklesIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+            Register Store
+          </Link>
+
+          <Link
             to={isAuthenticated ? '/dashboard' : '/login'}
-            className="flex items-center gap-1.5 px-5 py-2 bg-[#1B6E4C] hover:bg-[#14523A] text-white rounded-xl text-xs font-black shadow-md shadow-[#1B6E4C]/25 active:scale-95 transition-all"
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#24365A] hover:bg-[#1A2844] text-white rounded-xl text-xs font-black shadow-md active:scale-95 transition-all"
           >
             Sign In <ArrowRightIcon className="w-3.5 h-3.5 stroke-[2.5]" />
           </Link>
@@ -160,17 +168,17 @@ const Landing = () => {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center xl:justify-start">
             <Link
-              to="/login"
-              className="flex items-center justify-center gap-2 px-6 py-3 bg-[#1B6E4C] hover:bg-[#14523A] text-white rounded-2xl text-xs font-bold shadow-lg shadow-[#1B6E4C]/25 active:scale-[0.98] transition-all"
+              to="/register"
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-[#1B6E4C] hover:bg-[#14523A] text-white rounded-2xl text-xs font-black shadow-lg shadow-[#1B6E4C]/25 active:scale-[0.98] transition-all"
             >
-              Start Free Demo <ArrowRightIcon className="w-4 h-4 stroke-[2.5]" />
+              Start Free 7-Day Trial <ArrowRightIcon className="w-4 h-4 stroke-[2.5]" />
             </Link>
-            <a
-              href="#features"
+            <Link
+              to="/login"
               className="flex items-center justify-center gap-2 px-6 py-3 bg-white border border-[#1B6E4C]/15 hover:bg-[#EAF3EE] text-[#182A20] dark:bg-[#16241C] dark:border-[#EAF3EE]/10 dark:hover:bg-[#1D2E23] dark:text-[#EAF3EE] rounded-2xl text-xs font-bold shadow-sm transition-all"
             >
-              <Squares2X2Icon className="w-4 h-4 text-[#5C7A6B] dark:text-[#8FAE9C]" /> Explore Features
-            </a>
+              Sign In To Store <ArrowRightIcon className="w-4 h-4 stroke-[2.5]" />
+            </Link>
           </div>
 
           <div className="flex items-center justify-center xl:justify-start gap-4 pt-4">
@@ -180,7 +188,7 @@ const Landing = () => {
               ))}
             </div>
             <p className="text-xs font-bold text-[#4A6357] dark:text-[#9FBBA9]">
-              <span className="text-[#1B6E4C] dark:text-[#4FBE8B] font-extrabold">5,000+</span> kirana stores across India
+              <span className="text-[#1B6E4C] dark:text-[#4FBE8B] font-extrabold">5,000+</span> Stock Mangement across India
             </p>
           </div>
         </motion.div>
@@ -200,7 +208,7 @@ const Landing = () => {
               <div className="space-y-4">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm bg-[#1B6E4C] text-white p-1 rounded">🛒</span>
-                  <span className="text-[10px] font-black truncate">Kirana ESRP</span>
+                  <span className="text-[10px] font-black truncate">Stock Management</span>
                 </div>
 
                 <div className="space-y-1">
@@ -462,7 +470,7 @@ const Landing = () => {
       <section id="modules" className="py-20 px-6 max-w-7xl mx-auto">
         <div className="text-center space-y-2 mb-12">
           <h3 className="text-xs font-black text-[#1B6E4C] uppercase tracking-widest">Everything In One App</h3>
-          <h2 className="text-3xl font-black">Modules built for the way a kirana store runs</h2>
+          <h2 className="text-3xl font-black">Modules built for the way a Stock Management runs</h2>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {modules.map((m, i) => (
@@ -484,7 +492,7 @@ const Landing = () => {
             <h4 className="text-sm font-black tracking-tight flex items-center gap-1.5 justify-center md:justify-start">
               Trusted by <span className="text-[#1B6E4C] dark:text-[#4FBE8B]">5,000+</span>
             </h4>
-            <p className="text-[10px] text-[#8FA79A] font-bold uppercase tracking-wider mt-0.5">Kirana Stores Across India</p>
+            <p className="text-[10px] text-[#8FA79A] font-bold uppercase tracking-wider mt-0.5">Stock Management Across India</p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-12 text-[#8FA79A] font-black text-sm select-none">
             <div className="flex items-center gap-1"><span className="text-xs">🛒</span> <span className="font-extrabold text-[#24365A] dark:text-[#7C93BE]">More</span> <span className="text-[9px] uppercase font-black text-[#1B6E4C] dark:text-[#4FBE8B] tracking-wider">Megastore</span></div>
@@ -507,7 +515,7 @@ const Landing = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           {[
-            { plan: 'Starter Pack', price: '₹499', features: ['Up to 500 Product Items', 'Single POS Cashier Counter', 'Basic Stock Alerts', 'Export CSV Reports'], recommend: false },
+            { plan: 'Starter Pack', price: '₹800', features: ['Up to 500 Product Items', 'Single POS Cashier Counter', 'Basic Stock Alerts', 'Export CSV Reports'], recommend: false },
             { plan: 'Professional ERP', price: '₹999', features: ['Unlimited Product Catalog', 'Up to 3 Warehouse Locations', 'Digital Customer Credit Ledger', 'Roles & Access (Admin/Staff)', 'GST-ready Report Logs'], recommend: true },
             { plan: 'Enterprise Suite', price: 'Custom', features: ['Multi-store Syncing API', 'Automated Daily Backups', '24/7 Dedicated Support Hotline', 'Custom Integration Options'], recommend: false }
           ].map((pricing, idx) => (
