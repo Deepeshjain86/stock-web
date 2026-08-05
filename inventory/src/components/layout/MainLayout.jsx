@@ -5,6 +5,8 @@ import Sidebar from './Sidebar';
 import Footer from './Footer';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { setSidebarOpen } from '../../store/slices/sidebarSlice';
+import KeyboardShortcutsModal from '../common/KeyboardShortcutsModal';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
 /* ── Match Sidebar constants exactly ── */
 const SIDEBAR_COLLAPSED_W = 64;  // px — icons-only
@@ -14,6 +16,7 @@ const MainLayout = () => {
   const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
   const { isPinned } = useAppSelector((state) => state.sidebar);
+  const { showShortcutsModal, openShortcutsModal, closeShortcutsModal } = useKeyboardShortcuts();
 
   const monitoredTenant = localStorage.getItem('monitoredTenant');
   const tenantInfo = monitoredTenant ? JSON.parse(monitoredTenant) : null;
@@ -94,8 +97,11 @@ const MainLayout = () => {
 
           {/* Sticky Header */}
           <div className="sticky top-0 z-30 flex-shrink-0 w-full shadow-sm backdrop-blur-md bg-white/90 dark:bg-slate-900/90">
-            <Header />
+            <Header onOpenShortcuts={openShortcutsModal} />
           </div>
+
+          {/* Keyboard Shortcuts Help Guide Modal */}
+          <KeyboardShortcutsModal isOpen={showShortcutsModal} onClose={closeShortcutsModal} />
 
           {/* Scrollable workspace */}
           <div className="flex-1 flex flex-col justify-between overflow-y-auto overflow-x-hidden min-h-0 select-text scroll-smooth">

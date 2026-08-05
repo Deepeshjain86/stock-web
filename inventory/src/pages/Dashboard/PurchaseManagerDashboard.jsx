@@ -137,7 +137,7 @@ const PurchaseManagerDashboard = () => {
             Refresh
           </button>
           <button
-            onClick={() => navigate('/dashboard/purchases')}
+            onClick={() => navigate('/dashboard/purchase')}
             className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 active:scale-95 transition-all"
           >
             <PlusIcon className="h-5 w-5" />
@@ -240,7 +240,7 @@ const PurchaseManagerDashboard = () => {
                     <p className="font-semibold text-sm text-slate-800 dark:text-slate-200">{item.name}</p>
                     <p className="text-xs text-slate-500">Stock: <span className="font-bold text-amber-600">{item.current_stock}</span> / Min: {item.min_stock_level}</p>
                   </div>
-                  <button onClick={() => navigate('/dashboard/purchases')} className="px-3 py-1 text-xs font-bold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600">Reorder</button>
+                  <button onClick={() => navigate('/dashboard/purchase')} className="px-3 py-1 text-xs font-bold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600">Reorder</button>
                 </div>
               ))
             )}
@@ -250,7 +250,7 @@ const PurchaseManagerDashboard = () => {
 
       {/* Quick Action Navigation Buttons */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <button onClick={() => navigate('/dashboard/purchases')} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-emerald-500 hover:shadow-md transition-all">
+        <button onClick={() => navigate('/dashboard/purchase')} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-emerald-500 hover:shadow-md transition-all">
           <div className="rounded-xl bg-emerald-100 dark:bg-emerald-950/50 p-3 text-emerald-600">
             <DocumentTextIcon className="h-6 w-6" />
           </div>

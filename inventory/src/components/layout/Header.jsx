@@ -26,6 +26,7 @@ import {
   CheckCircleIcon,
   PencilSquareIcon,
   PhotoIcon,
+  CommandLineIcon
 } from '@heroicons/react/24/outline';
 import SearchBar from '../common/SearchBar';
 import ThemeToggle from '../common/ThemeToggle';
@@ -263,7 +264,7 @@ const ProfileModal = ({ onClose }) => {
 /* ──────────────────────────────────────────────
    MAIN HEADER COMPONENT
    ────────────────────────────────────────────── */
-const Header = () => {
+const Header = ({ onOpenShortcuts }) => {
   const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
   const [headerLogo] = useStoreLogo(user);
@@ -431,6 +432,16 @@ const Header = () => {
                 </div>
                 <span className="text-[11px] font-medium text-slate-400 mt-0.5">{dateStr}</span>
               </div>
+
+              {/* Keyboard Shortcuts Trigger */}
+              <button
+                onClick={onOpenShortcuts}
+                title="Keyboard Shortcuts (F1, Alt + K, Shift + ?)"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-white rounded-xl text-xs font-bold transition-all border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95"
+              >
+                <CommandLineIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400 stroke-[2.5]" />
+                <span className="font-mono text-[10px] bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-black">Alt + K</span>
+              </button>
 
               {/* Theme Toggle */}
               <ThemeToggle />

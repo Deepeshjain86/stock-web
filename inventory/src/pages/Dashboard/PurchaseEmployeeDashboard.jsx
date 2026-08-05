@@ -125,7 +125,7 @@ const PurchaseEmployeeDashboard = () => {
             Refresh Data
           </button>
           <button
-            onClick={() => navigate('/dashboard/purchases')}
+            onClick={() => navigate('/dashboard/purchase')}
             className="flex items-center gap-2 rounded-xl bg-teal-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-teal-500/30 hover:bg-teal-400 active:scale-95 transition-all"
           >
             <PlusIcon className="h-5 w-5" />
@@ -197,7 +197,7 @@ const PurchaseEmployeeDashboard = () => {
                     <p className="font-semibold text-sm text-slate-800 dark:text-slate-200">{item.product_name || item.name}</p>
                     <p className="text-xs text-slate-500">SKU: {item.sku || 'N/A'} • Stock: <span className="font-bold text-amber-600">{item.current_stock}</span> {item.unit || 'units'}</p>
                   </div>
-                  <button onClick={() => navigate('/dashboard/purchases')} className="px-3 py-1 text-xs font-bold rounded-lg bg-teal-600 text-white hover:bg-teal-700 active:scale-95 transition-all">Add GRN</button>
+                  <button onClick={() => navigate('/dashboard/purchase')} className="px-3 py-1 text-xs font-bold rounded-lg bg-teal-600 text-white hover:bg-teal-700 active:scale-95 transition-all">Add GRN</button>
                 </div>
               ))
             )}
@@ -207,7 +207,7 @@ const PurchaseEmployeeDashboard = () => {
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Recent GRN Purchase Invoices</h3>
-            <button onClick={() => navigate('/dashboard/purchases')} className="text-xs font-bold text-teal-600 hover:underline">View All</button>
+            <button onClick={() => navigate('/dashboard/purchase')} className="text-xs font-bold text-teal-600 hover:underline">View All</button>
           </div>
 
           <div className="space-y-3">
