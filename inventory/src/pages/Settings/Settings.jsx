@@ -194,11 +194,19 @@ const Settings = () => {
   // Handle general changes
   const handleStoreChange = (e) => {
     const { name, value } = e.target;
-    setStoreSettings(prev => ({ ...prev, [name]: value }));
+    let val = value;
+    if (name === 'store_phone' || name === 'phone') {
+      val = val.replace(/\D/g, '').slice(0, 10);
+    }
+    setStoreSettings(prev => ({ ...prev, [name]: val }));
   };
 
   // Save General settings
   const handleSaveStoreSettings = async () => {
+    if (storeSettings.store_phone && storeSettings.store_phone.replace(/\D/g, '').length !== 10) {
+      alert('Store Phone number must be exactly 10 digits.');
+      return;
+    }
     try {
       if (!dbOffline) {
         await settingsAPI.update(storeSettings);
@@ -447,13 +455,15 @@ const Settings = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Store Phone</label>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Store Phone (10 digits)</label>
                   <input
                     type="text"
                     name="store_phone"
                     value={storeSettings.store_phone}
                     onChange={handleStoreChange}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:outline-none focus:border-indigo-500 font-semibold text-slate-700"
+                    maxLength={10}
+                    placeholder="e.g. 9876543210"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:outline-none focus:border-indigo-500 font-semibold text-slate-700 font-mono"
                   />
                 </div>
                 <div>

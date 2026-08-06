@@ -170,6 +170,7 @@ const StoreManagement = () => {
     if (!form.store_name.trim()) { setFormError('Store Name is required.'); return; }
     if (!form.owner_name.trim()) { setFormError('Owner Full Name is required.'); return; }
     if (!form.email.trim()) { setFormError('Owner Email is required.'); return; }
+    if (form.phone && form.phone.replace(/\D/g, '').length !== 10) { setFormError('Mobile / Phone number must be exactly 10 digits.'); return; }
     if (!selectedStore && !form.admin_id.trim()) { setFormError('Admin ID is required.'); return; }
     if (!selectedStore && !form.password.trim()) { setFormError('Admin Password is required.'); return; }
     if (!selectedStore && form.password.length < 6) { setFormError('Password must be at least 6 characters.'); return; }
@@ -512,12 +513,13 @@ const StoreManagement = () => {
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-450 dark:text-slate-500 uppercase tracking-wider mb-1">Mobile / Phone</label>
+                        <label className="block text-[10px] font-bold text-slate-455 dark:text-slate-500 uppercase tracking-wider mb-1">Mobile / Phone (10 digits)</label>
                         <input
                           type="text" placeholder="9876543210"
                           value={form.phone}
-                          onChange={(e) => setForm({...form, phone: e.target.value})}
-                          className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 focus:border-indigo-500 rounded-xl font-semibold outline-none text-slate-800 dark:text-slate-200"
+                          onChange={(e) => setForm({...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10)})}
+                          maxLength={10}
+                          className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 focus:border-indigo-500 rounded-xl font-semibold outline-none text-slate-800 dark:text-slate-200 font-mono"
                         />
                       </div>
 

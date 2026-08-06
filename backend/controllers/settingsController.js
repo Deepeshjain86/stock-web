@@ -109,6 +109,17 @@ export const updateSettings = async (req, res, next) => {
 
     const settingsData = req.body; // Key-value object
 
+    if (settingsData.store_phone || settingsData.phone) {
+      const phoneVal = settingsData.store_phone || settingsData.phone;
+      const cleaned = String(phoneVal).replace(/\D/g, '');
+      if (cleaned.length !== 10) {
+        connection.release();
+        return res.status(400).json({ success: false, message: 'Store Phone / Contact number must be exactly 10 digits' });
+      }
+      if (settingsData.store_phone) settingsData.store_phone = cleaned;
+      if (settingsData.phone) settingsData.phone = cleaned;
+    }
+
     for (const [key, value] of Object.entries(settingsData)) {
       await connection.query(
         'INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?',

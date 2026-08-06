@@ -295,20 +295,6 @@ const ProductForm = ({ product, categories = [], onSubmit, onCancel, readOnly = 
                 </select>
               </div>
 
-              {/* Measurement Value / Net Content Size */}
-              <div>
-                <label className="block text-[10px] font-black text-slate-505 dark:text-slate-400 uppercase tracking-widest mb-1">
-                  Measurement Value / Net Size
-                </label>
-                <input
-                  type="text"
-                  name="measurement_value"
-                  value={formData.measurement_value || ''}
-                  onChange={handleChange}
-                  placeholder="e.g. 500g, 1.5 L, 250ml, 5 Kg"
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-500 bg-slate-50/50 dark:bg-slate-950/20 font-semibold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none"
-                />
-              </div>
 
               {/* Product Image File */}
               <div className="sm:col-span-1 md:col-span-1">

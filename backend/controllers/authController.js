@@ -511,6 +511,14 @@ export const updateProfile = async (req, res, next) => {
     const currentEmail = req.user.email;
     const userId = req.user.id;
 
+    let cleanPhone = null;
+    if (phone && String(phone).trim() !== '') {
+      cleanPhone = String(phone).replace(/\D/g, '');
+      if (cleanPhone.length !== 10) {
+        return res.status(400).json({ success: false, message: 'Mobile Number must be exactly 10 digits' });
+      }
+    }
+
     // Handle password update if provided
     let hashedPassword = null;
     if (currentPassword && newPassword) {
@@ -669,7 +677,14 @@ export const registerStore = async (req, res, next) => {
     const cleanPassword = String(password).trim();
     const cleanOwner = String(owner_name).trim();
     const cleanStore = String(store_name).trim();
-    const cleanPhone = phone ? String(phone).trim() : null;
+    let cleanPhone = null;
+    if (phone && String(phone).trim() !== '') {
+      cleanPhone = String(phone).replace(/\D/g, '');
+      if (cleanPhone.length !== 10) {
+        masterConn.release();
+        return res.status(400).json({ success: false, message: 'Contact / Mobile Number must be exactly 10 digits' });
+      }
+    }
 
     if (cleanPassword.length < 6) {
       masterConn.release();

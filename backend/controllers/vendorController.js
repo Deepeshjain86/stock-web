@@ -111,16 +111,27 @@ export const createVendor = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Supplier name is required', field: 'name' });
     }
 
-    if (!phone) {
+    if (!phone || String(phone).trim() === '') {
       return res.status(400).json({ success: false, message: 'Supplier mobile number is required', field: 'phone' });
     }
 
-    // Duplicate Checks
-    if (phone) {
-      const [dupPhone] = await req.db.query('SELECT id FROM vendors WHERE phone = ?', [phone]);
-      if (dupPhone.length > 0) {
-        return res.status(400).json({ success: false, message: `A supplier with mobile number "${phone}" already exists.`, field: 'phone' });
+    const cleanedPhone = String(phone).replace(/\D/g, '');
+    if (cleanedPhone.length !== 10) {
+      return res.status(400).json({ success: false, message: 'Supplier mobile number must be exactly 10 digits', field: 'phone' });
+    }
+
+    let cleanedAltPhone = null;
+    if (alternate_phone && String(alternate_phone).trim() !== '') {
+      cleanedAltPhone = String(alternate_phone).replace(/\D/g, '');
+      if (cleanedAltPhone.length !== 10) {
+        return res.status(400).json({ success: false, message: 'Alternate mobile number must be exactly 10 digits', field: 'alternate_phone' });
       }
+    }
+
+    // Duplicate Checks
+    const [dupPhone] = await req.db.query('SELECT id FROM vendors WHERE phone = ?', [cleanedPhone]);
+    if (dupPhone.length > 0) {
+      return res.status(400).json({ success: false, message: `A supplier with mobile number "${cleanedPhone}" already exists.`, field: 'phone' });
     }
 
     if (gstin) {
@@ -147,8 +158,8 @@ export const createVendor = async (req, res, next) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
-        phone || null,
-        alternate_phone || null,
+        cleanedPhone,
+        cleanedAltPhone || null,
         email || null,
         address || null,
         gstin || null,
@@ -207,7 +218,7 @@ export const createVendor = async (req, res, next) => {
         id: newId,
         supplier_code: supplierCode,
         name,
-        phone,
+        phone: cleanedPhone,
         email,
         company_name,
         status
@@ -236,11 +247,23 @@ export const updateVendor = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
-    // Duplicate Checks for phone, gstin, email excluding current supplier
+    let cleanedPhone = null;
     if (phone) {
-      const [dupPhone] = await req.db.query('SELECT id FROM vendors WHERE phone = ? AND id != ?', [phone, id]);
+      cleanedPhone = String(phone).replace(/\D/g, '');
+      if (cleanedPhone.length !== 10) {
+        return res.status(400).json({ success: false, message: 'Supplier mobile number must be exactly 10 digits', field: 'phone' });
+      }
+      const [dupPhone] = await req.db.query('SELECT id FROM vendors WHERE phone = ? AND id != ?', [cleanedPhone, id]);
       if (dupPhone.length > 0) {
-        return res.status(400).json({ success: false, message: `Another supplier with mobile number "${phone}" already exists.`, field: 'phone' });
+        return res.status(400).json({ success: false, message: `Another supplier with mobile number "${cleanedPhone}" already exists.`, field: 'phone' });
+      }
+    }
+
+    let cleanedAltPhone = null;
+    if (alternate_phone && String(alternate_phone).trim() !== '') {
+      cleanedAltPhone = String(alternate_phone).replace(/\D/g, '');
+      if (cleanedAltPhone.length !== 10) {
+        return res.status(400).json({ success: false, message: 'Alternate mobile number must be exactly 10 digits', field: 'alternate_phone' });
       }
     }
 
@@ -282,8 +305,8 @@ export const updateVendor = async (req, res, next) => {
       WHERE id = ?`,
       [
         name || previousName,
-        phone || null,
-        alternate_phone || null,
+        cleanedPhone || null,
+        cleanedAltPhone || null,
         email || null,
         address || null,
         gstin || null,

@@ -63,7 +63,9 @@ const SalesReturn = () => {
   const [historyCustomer, setHistoryCustomer] = useState('');
   const [historyReturnType, setHistoryReturnType] = useState('all');
 
-  // --- VOUCHER PRINT MODAL ---
+  // --- VOUCHER PRINT & CONFIRMATION MODALS ---
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingPayload, setPendingPayload] = useState(null);
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [selectedVoucher, setSelectedVoucher] = useState(null);
 
@@ -272,29 +274,39 @@ const SalesReturn = () => {
       return;
     }
 
+    const returnItemsList = checkedKeys.map(k => ({
+      sale_item_id: selectedItems[k].sale_item_id,
+      product_id: Number(selectedItems[k].product_id),
+      quantity: selectedItems[k].returnQty,
+      productName: selectedItems[k].productName,
+      unitPrice: selectedItems[k].unitPrice
+    }));
+
+    const payload = {
+      sale_id: selectedInvoice.sale_id,
+      items: returnItemsList,
+      product_id: Number(firstItem.product_id),
+      quantity: firstItem.returnQty,
+      reason: returnReason,
+      return_type: returnType,
+      refund_method: isBorrowInvoice ? 'Credit Note / Udhaar Settlement' : refundMethod,
+      remarks,
+      replacement_product_id: returnType === 'Exchange' && replacementProductId ? Number(replacementProductId) : null,
+      replacement_quantity: returnType === 'Exchange' ? Number(replacementQty) : 0,
+      price_difference: returnType === 'Exchange' ? priceDifference : 0
+    };
+
+    setPendingPayload(payload);
+    setShowConfirmModal(true);
+  };
+
+  const executeProcessReturn = async () => {
+    if (!pendingPayload) return;
     setSubmitting(true);
+    setShowConfirmModal(false);
+
     try {
-      const returnItemsList = checkedKeys.map(k => ({
-        sale_item_id: selectedItems[k].sale_item_id,
-        product_id: Number(selectedItems[k].product_id),
-        quantity: selectedItems[k].returnQty
-      }));
-
-      const payload = {
-        sale_id: selectedInvoice.sale_id,
-        items: returnItemsList,
-        product_id: Number(firstItem.product_id),
-        quantity: firstItem.returnQty,
-        reason: returnReason,
-        return_type: returnType,
-        refund_method: isBorrowInvoice ? 'Credit Note / Udhaar Settlement' : refundMethod,
-        remarks,
-        replacement_product_id: returnType === 'Exchange' && replacementProductId ? Number(replacementProductId) : null,
-        replacement_quantity: returnType === 'Exchange' ? Number(replacementQty) : 0,
-        price_difference: returnType === 'Exchange' ? priceDifference : 0
-      };
-
-      const res = await salesReturnsAPI.create(payload);
+      const res = await salesReturnsAPI.create(pendingPayload);
       if (res && res.success) {
         dispatch(showToast({ msg: res.message || `Sales Return Voucher ${res.returnNo} processed successfully!`, type: 'success' }));
         
@@ -320,6 +332,7 @@ const SalesReturn = () => {
         setSearchInvoices([]);
         setSelectedItems({});
         setRemarks('');
+        setPendingPayload(null);
       }
     } catch (err) {
       dispatch(showToast({ msg: err.response?.data?.message || 'Failed to process sales return', type: 'error' }));
@@ -510,7 +523,15 @@ const SalesReturn = () => {
 
           {/* STEP 2 & 3: INVOICE DETAILS & ITEM RETURN SELECTION */}
           {selectedInvoice && (
-            <form onSubmit={handleProcessReturnSubmit} className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
+            <form
+              onSubmit={handleProcessReturnSubmit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                  e.preventDefault();
+                }
+              }}
+              className="space-y-6 animate-[fadeIn_0.2s_ease-out]"
+            >
               
               {/* INVOICE HEADER AUTO SUMMARY */}
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xs space-y-4">
@@ -932,6 +953,81 @@ const SalesReturn = () => {
           </div>
         </div>
       )}
+
+      {/* CONFIRMATION MODAL BEFORE PROCESSING RETURN */}
+      <Modal
+        isOpen={showConfirmModal}
+        onClose={() => {
+          setShowConfirmModal(false);
+          setPendingPayload(null);
+        }}
+        title="⚠️ Confirm Sales Return & Inventory Stock Restoration"
+      >
+        {pendingPayload && selectedInvoice && (
+          <div className="space-y-4 text-xs font-semibold text-slate-800 dark:text-slate-200">
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 flex items-start gap-3">
+              <ExclamationTriangleIcon className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-black text-amber-900 dark:text-amber-200 uppercase text-[11px]">
+                  Confirm Stock Return Action
+                </h4>
+                <p className="text-amber-800 dark:text-amber-300 font-bold mt-0.5">
+                  Are you sure you want to complete this return? Stock levels in warehouse inventory and customer ledger balance will be updated now.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+              <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-2">
+                <span className="font-black text-slate-900 dark:text-white text-sm">Invoice #: {selectedInvoice.invoice_no}</span>
+                <span className="text-emerald-600 font-black text-sm">Total Refund: ₹{totalCalculatedRefund.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-slate-600 dark:text-slate-400 pt-1">
+                <div>Customer: <strong className="text-slate-900 dark:text-white">{selectedInvoice.customer_name} ({selectedInvoice.customer_phone})</strong></div>
+                <div>Return Reason: <strong className="text-slate-900 dark:text-white">{returnReason}</strong></div>
+                <div>Return Mode: <strong className="text-slate-900 dark:text-white">{returnType}</strong></div>
+                <div>Refund Method: <strong className="text-slate-900 dark:text-white">{isBorrowInvoice ? 'Udhaar Credit Settlement' : refundMethod}</strong></div>
+              </div>
+
+              {pendingPayload.items && pendingPayload.items.length > 0 && (
+                <div className="pt-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Items To Return:</span>
+                  <div className="space-y-1">
+                    {pendingPayload.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                        <span>{it.productName || `Product #${it.product_id}`} (x{it.quantity})</span>
+                        <span className="font-black text-emerald-600">₹{((it.unitPrice || 0) * it.quantity).toLocaleString('en-IN')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  setPendingPayload(null);
+                }}
+                className="px-5 py-2.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={executeProcessReturn}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 text-white font-black rounded-xl text-xs shadow-lg transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                <CheckCircleIcon className="w-4 h-4" />
+                {submitting ? 'Processing Return...' : 'Yes, Confirm & Complete Return Voucher'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* VOUCHER PRINT MODAL */}
       <Modal

@@ -176,14 +176,20 @@ const CustomerList = () => {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (isReadOnly) return;
+    const cleanedPhone = form.phone ? form.phone.replace(/\D/g, '') : '';
+    if (cleanedPhone.length !== 10) {
+      toast.error('Mobile / Phone number must be exactly 10 digits');
+      return;
+    }
     try {
+      const payload = { ...form, phone: cleanedPhone };
       if (selectedCustomer) {
-        const res = await customersAPI.update(selectedCustomer.id, form);
+        const res = await customersAPI.update(selectedCustomer.id, payload);
         if (res.success) {
           toast.success('Customer profile updated successfully');
         }
       } else {
-        const res = await customersAPI.create(form);
+        const res = await customersAPI.create(payload);
         if (res.success) {
           toast.success('New customer registered successfully');
         }
@@ -815,7 +821,8 @@ const CustomerList = () => {
                     <input
                       type="text" required placeholder="e.g. 9876543210 (10 digits)"
                       value={form.phone}
-                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                      onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                      maxLength={10}
                       className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-semibold outline-none text-slate-850 dark:text-slate-200"
                     />
                   </div>

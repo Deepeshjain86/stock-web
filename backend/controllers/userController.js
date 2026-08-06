@@ -70,10 +70,17 @@ export const createUser = async (req, res, next) => {
     }
 
     // Verify unique contact constraint locally
-    if (contact) {
-      const [existingContact] = await connection.query('SELECT id FROM users WHERE contact = ?', [contact]);
+    let cleanedContact = null;
+    if (contact && String(contact).trim() !== '') {
+      cleanedContact = String(contact).replace(/\D/g, '');
+      if (cleanedContact.length !== 10) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: 'Contact number must be exactly 10 digits', field: 'contact' });
+      }
+      const [existingContact] = await connection.query('SELECT id FROM users WHERE contact = ?', [cleanedContact]);
       if (existingContact.length > 0) {
-        return res.status(400).json({ success: false, message: `Contact number "${contact}" is already registered with another staff member.`, field: 'contact' });
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: `Contact number "${cleanedContact}" is already registered with another staff member.`, field: 'contact' });
       }
     }
 
@@ -164,7 +171,7 @@ export const createUser = async (req, res, next) => {
     // 3. Insert user locally in tenant DB
     const [localResult] = await connection.query(
       'INSERT INTO users (name, email, contact, password, role_id, status, department, login_id, employee_serial_id) VALUES (?, ?, ?, ?, ?, "Active", ?, ?, ?)',
-      [name, email, contact || null, hashedPassword, role_id, dept, generatedLoginId, nextSerial]
+      [name, email, cleanedContact || null, hashedPassword, role_id, dept, generatedLoginId, nextSerial]
     );
 
     // 4. Insert user globally in Master DB users table
@@ -270,10 +277,17 @@ export const updateUser = async (req, res, next) => {
     }
 
     // Check duplicate contact locally if contact is changing
-    if (contact) {
-      const [contactCheck] = await connection.query('SELECT id FROM users WHERE contact = ? AND id != ?', [contact, id]);
+    let cleanedContact = undefined;
+    if (contact !== undefined && contact !== null && String(contact).trim() !== '') {
+      cleanedContact = String(contact).replace(/\D/g, '');
+      if (cleanedContact.length !== 10) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: 'Contact number must be exactly 10 digits', field: 'contact' });
+      }
+      const [contactCheck] = await connection.query('SELECT id FROM users WHERE contact = ? AND id != ?', [cleanedContact, id]);
       if (contactCheck.length > 0) {
-        return res.status(400).json({ success: false, message: `Contact number "${contact}" is already registered with another staff member.`, field: 'contact' });
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: `Contact number "${cleanedContact}" is already registered with another staff member.`, field: 'contact' });
       }
     }
 
@@ -322,7 +336,7 @@ export const updateUser = async (req, res, next) => {
     // 1. Update user locally
     await connection.query(
       'UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), contact = ?, role_id = COALESCE(?, role_id), status = COALESCE(?, status), department = COALESCE(?, department) WHERE id = ?',
-      [name, email || null, contact ?? existing[0].contact ?? null, role_id, status, department || currentDept, id]
+      [name, email || null, cleanedContact !== undefined ? cleanedContact : (existing[0].contact ?? null), role_id, status, department || currentDept, id]
     );
 
     // Update password if provided in update payload

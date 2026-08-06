@@ -83,14 +83,14 @@ export const createCustomer = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Customer Full Name is required' });
     }
 
-    if (!phone || phone.trim() === '') {
+    if (!phone || String(phone).trim() === '') {
       return res.status(400).json({ success: false, message: 'Mobile / Phone Number is required' });
     }
 
-    // Clean phone number (remove spaces, hyphens, plus signs, parentheses)
-    const cleanedPhone = phone.replace(/[\s\-\+\(\)]/g, '');
-    if (cleanedPhone.length < 10) {
-      return res.status(400).json({ success: false, message: 'Mobile Number must contain at least 10 digits' });
+    // Clean phone number (strip non-digits)
+    const cleanedPhone = String(phone).replace(/\D/g, '');
+    if (cleanedPhone.length !== 10) {
+      return res.status(400).json({ success: false, message: 'Mobile / Phone Number must be exactly 10 digits' });
     }
 
     const type = customer_type || 'Walk-in';
@@ -168,7 +168,7 @@ export const createCustomer = async (req, res, next) => {
         id: newId,
         customer_code: customerCode,
         name,
-        phone,
+        phone: cleanedPhone,
         customer_type: type,
         status: activeStatus,
         payment_mode: pm,
@@ -200,10 +200,11 @@ export const updateCustomer = async (req, res, next) => {
     }
 
     // Phone format validation (10 digits) if provided
+    let cleanedPhone = null;
     if (phone) {
-      const phoneRegex = /^[0-9]{10}$/;
-      if (!phoneRegex.test(phone.trim())) {
-        return res.status(400).json({ success: false, message: 'Mobile Number must be a valid 10-digit number' });
+      cleanedPhone = String(phone).replace(/\D/g, '');
+      if (cleanedPhone.length !== 10) {
+        return res.status(400).json({ success: false, message: 'Mobile / Phone Number must be exactly 10 digits' });
       }
     }
 
@@ -245,7 +246,7 @@ export const updateCustomer = async (req, res, next) => {
        WHERE id = ?`,
       [
         name ? name.trim() : null,
-        phone ? phone.trim() : null,
+        cleanedPhone || null,
         address || null,
         type,
         activeStatus,

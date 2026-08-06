@@ -340,6 +340,10 @@ const StaffList = () => {
       newErrors.password = 'Password must be at least 6 characters long';
     }
 
+    if (formData.contact?.trim() && formData.contact.replace(/\D/g, '').length !== 10) {
+      newErrors.contact = 'Contact number must be exactly 10 digits';
+    }
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       const firstInvalidField = Object.keys(newErrors)[0];
@@ -707,9 +711,9 @@ const StaffList = () => {
                   name="staff-contact"
                   inputMode="numeric"
                   value={formData.contact}
-                  onChange={(e) => handleFieldChange('contact', e.target.value.replace(/[^0-9+\-\s]/g, ''))}
-                  placeholder="Contact No."
-                  maxLength={20}
+                  onChange={(e) => handleFieldChange('contact', e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="10-digit Contact No."
+                  maxLength={10}
                   className={`w-full pl-9 pr-3 py-2 text-xs border rounded-xl focus:outline-none font-bold transition-all ${
                     errors.contact 
                       ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 bg-rose-50/30 dark:bg-rose-950/40' 

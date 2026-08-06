@@ -9,7 +9,7 @@ import KeyboardShortcutsModal from '../common/KeyboardShortcutsModal';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
 /* ── Match Sidebar constants exactly ── */
-const SIDEBAR_COLLAPSED_W = 64;  // px — icons-only
+const SIDEBAR_COLLAPSED_W = 72;  // px — icons-only
 const SIDEBAR_EXPANDED_W  = 260; // px — full width
 
 const MainLayout = () => {

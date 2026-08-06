@@ -69,7 +69,11 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    let finalValue = value;
+    if (name === 'phone' || name === 'alternate_phone') {
+      finalValue = value.replace(/\D/g, '').slice(0, 10);
+    }
+    setFormData((prev) => ({ ...prev, [name]: finalValue }));
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }));
     }
@@ -104,6 +108,16 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
 
     if (!formData.name?.trim()) {
       newErrors.name = 'Supplier name is required';
+    }
+
+    if (!formData.phone?.trim()) {
+      newErrors.phone = 'Supplier mobile number is required';
+    } else if (formData.phone.replace(/\D/g, '').length !== 10) {
+      newErrors.phone = 'Supplier mobile number must be exactly 10 digits';
+    }
+
+    if (formData.alternate_phone?.trim() && formData.alternate_phone.replace(/\D/g, '').length !== 10) {
+      newErrors.alternate_phone = 'Alternate mobile number must be exactly 10 digits';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -223,7 +237,8 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
               name="phone"
               value={formData.phone}
               onChange={handleChange}
-              placeholder="10-digit mobile number"
+              maxLength={10}
+              placeholder="mobile number"
               className={`w-full px-3 py-2 text-xs border rounded-xl focus:outline-none bg-slate-50/50 font-bold transition-all ${
                 errors.phone ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 bg-rose-50/30' : 'border-slate-200 focus:border-emerald-600 text-slate-800'
               }`}
@@ -242,6 +257,7 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
               name="alternate_phone"
               value={formData.alternate_phone || ''}
               onChange={handleChange}
+              maxLength={10}
               placeholder="Alternate mobile number"
               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 bg-slate-50/50 font-bold text-slate-800"
             />
@@ -275,7 +291,7 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
               name="gstin"
               value={formData.gstin || ''}
               onChange={handleChange}
-              placeholder="15-digit GSTIN"
+              placeholder="GSTIN"
               className={`w-full px-3 py-2 text-xs border rounded-xl focus:outline-none bg-slate-50/50 font-mono font-bold transition-all ${
                 errors.gstin ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 bg-rose-50/30' : 'border-slate-200 focus:border-emerald-600 text-slate-850'
               }`}
@@ -295,7 +311,7 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
               name="pan"
               value={formData.pan || ''}
               onChange={handleChange}
-              placeholder="10-character PAN"
+              placeholder="PAN card"
               className={`w-full px-3 py-2 text-xs border rounded-xl focus:outline-none bg-slate-50/50 font-mono font-bold transition-all ${
                 errors.pan ? 'border-rose-500 ring-2 ring-rose-200 text-rose-900 bg-rose-50/30' : 'border-slate-200 focus:border-emerald-600 text-slate-850'
               }`}
@@ -365,7 +381,7 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
               name="pincode"
               value={formData.pincode || ''}
               onChange={handleChange}
-              placeholder="6-digit pincode"
+              placeholder="pincode"
               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 bg-slate-50/50 font-bold text-slate-800"
             />
           </div>

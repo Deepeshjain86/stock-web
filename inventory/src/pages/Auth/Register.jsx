@@ -37,7 +37,11 @@ const Register = () => {
   const [error, setError] = useState('');
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    let val = e.target.value;
+    if (e.target.name === 'phone') {
+      val = val.replace(/\D/g, '').slice(0, 10);
+    }
+    setForm({ ...form, [e.target.name]: val });
     if (error) setError('');
   };
 
@@ -50,6 +54,11 @@ const Register = () => {
 
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (form.phone && form.phone.replace(/\D/g, '').length !== 10) {
+      setError('Phone number must be exactly 10 digits.');
       return;
     }
 
@@ -265,7 +274,8 @@ const Register = () => {
                     value={form.phone}
                     onChange={handleChange}
                     autoComplete="off"
-                    placeholder="Contact"
+                    placeholder="Contact No. (10 digits)"
+                    maxLength={10}
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:font-medium focus:outline-none focus:border-indigo-500 transition-colors"
                   />
                 </div>

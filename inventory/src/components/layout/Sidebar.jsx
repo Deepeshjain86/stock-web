@@ -24,7 +24,7 @@ import { showToast } from '../../store/slices/notificationSlice';
 /* ─────────────────────────────────────────────
    CONSTANTS
 ───────────────────────────────────────────── */
-const SIDEBAR_COLLAPSED_W = 76;
+const SIDEBAR_COLLAPSED_W = 72;
 const SIDEBAR_EXPANDED_W  = 260;
 const MOBILE_BREAKPOINT   = 768;
 
@@ -329,11 +329,13 @@ const Sidebar = () => {
       >
 
         {/* ══ HEADER ══ */}
-        <div className="flex items-center justify-between px-3 py-3.5 flex-shrink-0 border-b border-slate-100 dark:border-slate-800/60 min-h-[76px]">
+        <div className="flex items-center justify-between px-3 h-[75px] flex-shrink-0 border-b border-slate-100 dark:border-slate-800/60 overflow-hidden">
           <div className={`flex items-center gap-3 min-w-0 ${!isExpanded ? 'w-full justify-center' : ''}`}>
             <div
               onClick={handleLogoClick}
-              className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#1B6E4C] to-emerald-700 text-white font-black shadow-md shadow-[#1B6E4C]/20 border border-slate-200 dark:border-slate-800 select-none cursor-pointer hover:scale-105 active:scale-95 transition-all relative overflow-hidden group"
+              className={`flex flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#1B6E4C] to-emerald-700 text-white font-black shadow-md shadow-[#1B6E4C]/20 border border-slate-200 dark:border-slate-800 select-none cursor-pointer hover:scale-105 active:scale-95 transition-all relative overflow-hidden group ${
+                isExpanded ? 'h-11 w-11' : 'h-10 w-10'
+              }`}
               title="Click to update shop logo from PC"
             >
               {activeLogo ? (
@@ -344,17 +346,17 @@ const Sidebar = () => {
                   onError={() => setActiveLogo(null)}
                 />
               ) : (
-                <BuildingStorefrontIcon className="w-8 h-8 text-white" />
+                <BuildingStorefrontIcon className={`${isExpanded ? 'w-6 h-6' : 'w-5 h-5'} text-white`} />
               )}
 
               {uploadingLogo && (
                 <div className="absolute inset-0 bg-slate-950/60 flex items-center justify-center">
-                  <ArrowPathIcon className="w-5 h-5 text-white animate-spin" />
+                  <ArrowPathIcon className="w-4 h-4 text-white animate-spin" />
                 </div>
               )}
 
               {!uploadingLogo && (
-                <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[9px] font-black text-white uppercase tracking-wider text-center p-1">
+                <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[9px] font-black text-white uppercase tracking-wider text-center p-0.5">
                   Upload
                 </div>
               )}
@@ -381,8 +383,8 @@ const Sidebar = () => {
           <div
             style={{
               opacity: isExpanded ? 1 : 0,
+              display: isExpanded ? 'block' : 'none',
               transition: 'opacity 150ms ease',
-              pointerEvents: isExpanded ? 'auto' : 'none',
               flexShrink: 0,
             }}
           >
@@ -426,13 +428,15 @@ const Sidebar = () => {
                 title={!isExpanded ? item.label : undefined}
                 className={({ isActive }) =>
                   `group flex items-center p-2.5 rounded-xl transition-colors duration-150 border ${
+                    !isExpanded ? 'justify-center' : ''
+                  } ${
                     isActive
                       ? 'bg-[#1B6E4C]/10 text-[#1B6E4C] border-[#1B6E4C]/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 font-bold'
                       : 'text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 font-semibold'
                   }`
                 }
               >
-                <div className={`flex items-center justify-center flex-shrink-0 ${!isExpanded ? 'w-full' : ''}`}>
+                <div className="flex items-center justify-center flex-shrink-0">
                   <Icon className="w-5 h-5 flex-shrink-0 transition-colors group-hover:text-[#1B6E4C] dark:group-hover:text-emerald-400" />
                 </div>
                 <span
@@ -441,7 +445,7 @@ const Sidebar = () => {
                     opacity: isExpanded ? 1 : 0,
                     maxWidth: isExpanded ? '180px' : '0px',
                     transition: 'opacity 150ms ease, max-width 250ms ease',
-                    display: 'block',
+                    display: isExpanded ? 'block' : 'none',
                   }}
                 >
                   {item.label}

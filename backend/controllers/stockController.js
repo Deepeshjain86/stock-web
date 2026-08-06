@@ -41,7 +41,7 @@ export const adjustStock = async (req, res, next) => {
   try {
     await connection.beginTransaction();
 
-    const { product_id, warehouse_id, type, quantity, notes, reason } = req.body;
+    const { product_id, warehouse_id, type, quantity, notes, reason, batch_number, mfg_date, exp_date } = req.body;
 
     if (!product_id || !warehouse_id || !type || quantity === undefined) {
       await connection.rollback();
@@ -50,7 +50,7 @@ export const adjustStock = async (req, res, next) => {
     }
 
     const qty = Number(quantity);
-    if (isNaN(qty) || qty < 0) {
+    if (isNaN(qty) || qty <= 0) {
       await connection.rollback();
       connection.release();
       return res.status(400).json({ success: false, message: 'Quantity must be a valid positive number' });
@@ -105,12 +105,18 @@ export const adjustStock = async (req, res, next) => {
       const defaultMrp = Number(prod?.mrp || 0);
       const defaultSellingPrice = Number(prod?.selling_price || 0);
       const defaultPurchasePrice = Number(prod?.purchase_price || 0);
+      const finalBatchNo = batch_number || `ADJ-BATCH-${Date.now()}`;
+      const finalExpDate = exp_date || null;
 
       await connection.query(
-        `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, purchase_price, mrp, selling_price, warehouse_id)
-         VALUES (?, ?, ?, ?, CURRENT_DATE(), ?, ?, ?, ?)`,
-        [product_id, `ADJ-BATCH-${Date.now()}`, changeAmount, changeAmount, defaultPurchasePrice, defaultMrp, defaultSellingPrice, warehouse_id]
+        `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, warehouse_id)
+         VALUES (?, ?, ?, ?, CURRENT_DATE(), ?, ?, ?, ?, ?)`,
+        [product_id, finalBatchNo, changeAmount, changeAmount, finalExpDate, defaultPurchasePrice, defaultMrp, defaultSellingPrice, warehouse_id]
       );
+
+      if (finalExpDate) {
+        await connection.query('UPDATE products SET expiry_date = ? WHERE id = ?', [finalExpDate, product_id]);
+      }
     } else if (changeAmount < 0) {
       let remDeduct = Math.abs(changeAmount);
       const [pbRows] = await connection.query(
@@ -126,7 +132,7 @@ export const adjustStock = async (req, res, next) => {
       }
     }
     const finalReason = reason || 'Manual Recount';
-    const notesDetails = `Reason: ${finalReason} | Notes: ${notes || 'None'}`;
+    const notesDetails = notes && notes.startsWith('Reason:') ? notes : `Reason: ${finalReason} | Remarks: ${notes || 'None'}`;
     
     await connection.query(
       `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)

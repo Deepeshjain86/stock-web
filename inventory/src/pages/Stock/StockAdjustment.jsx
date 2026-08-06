@@ -207,6 +207,41 @@ const StockAdjustment = ({ onStockChanged }) => {
     }));
   };
 
+  // Handle Search Input Changes & Smart Sync
+  const handleProductSearchChange = (val) => {
+    setSearchProductQuery(val);
+    setShowProductDropdown(true);
+
+    const trimmed = val.trim().toLowerCase();
+    if (!trimmed) {
+      setSelectedProductDetails(null);
+      setFormData(prev => ({ ...prev, productId: '', category: '', unit: 'Pieces' }));
+      return;
+    }
+
+    // Auto match exact name, barcode, or SKU
+    const exactMatch = productList.find(
+      p => (p.name && p.name.toLowerCase() === trimmed) || 
+           (p.barcode && p.barcode.toLowerCase() === trimmed) || 
+           (p.sku && p.sku.toLowerCase() === trimmed)
+    );
+
+    if (exactMatch) {
+      setSelectedProductDetails(exactMatch);
+      setFormData((prev) => ({
+         ...prev,
+         productId: exactMatch.id,
+         category: exactMatch.category || 'General',
+         unit: exactMatch.unit || 'Pieces',
+         mfgDate: exactMatch.manufacturing_date ? exactMatch.manufacturing_date.split('T')[0] : prev.mfgDate,
+         expDate: exactMatch.expiry_date ? exactMatch.expiry_date.split('T')[0] : prev.expDate
+      }));
+    } else if (selectedProductDetails && selectedProductDetails.name.toLowerCase() !== trimmed) {
+      setSelectedProductDetails(null);
+      setFormData(prev => ({ ...prev, productId: '' }));
+    }
+  };
+
   // Handle Input Changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -215,7 +250,7 @@ const StockAdjustment = ({ onStockChanged }) => {
 
   // Updated Stock Quantity Calculation
   const calculatedUpdatedStock = useMemo(() => {
-    const current = selectedProductDetails ? selectedProductDetails.stock || 0 : 0;
+    const current = selectedProductDetails ? Number(selectedProductDetails.stock || selectedProductDetails.total_stock || 0) : 0;
     const qty = parseInt(formData.quantity) || 0;
     if (formData.type === 'Increase') {
       return current + qty;
@@ -228,17 +263,23 @@ const StockAdjustment = ({ onStockChanged }) => {
   // Submit Handler (Transaction Wrapped)
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.productId || !formData.quantity) {
-      triggerToast('Please select a product and enter quantity', 'error');
+    
+    if (!formData.productId) {
+      triggerToast('Please select a valid product from the dropdown list', 'error');
       return;
     }
+    if (!formData.quantity) {
+      triggerToast('Please enter an adjustment quantity', 'error');
+      return;
+    }
+
     const qty = Number(formData.quantity);
     if (isNaN(qty) || qty <= 0) {
       triggerToast('Quantity must be a positive number greater than 0', 'error');
       return;
     }
     
-    const current = selectedProductDetails ? selectedProductDetails.stock || 0 : 0;
+    const current = selectedProductDetails ? Number(selectedProductDetails.stock || selectedProductDetails.total_stock || 0) : 0;
     if (formData.type === 'Decrease' && qty > current) {
       triggerToast(`Validation Error: Decrease quantity (${qty}) cannot exceed current stock (${current}).`, 'error');
       return;
@@ -256,7 +297,10 @@ const StockAdjustment = ({ onStockChanged }) => {
         type: typeVal,
         quantity: qty,
         reason: formData.reason,
-        notes: notesDetails
+        notes: notesDetails,
+        batch_number: formData.batchNo || null,
+        mfg_date: formData.mfgDate || null,
+        exp_date: formData.expDate || null
       };
 
       if (!dbOffline) {
@@ -287,6 +331,8 @@ const StockAdjustment = ({ onStockChanged }) => {
           user_name: user?.name || 'Store Manager'
         };
 
+        // Update product stock in local memory
+        setProductList(prev => prev.map(p => p.id === Number(formData.productId) ? { ...p, stock: newQty } : p));
         setRecords([newRecord, ...records]);
         triggerToast('Stock adjustment simulated successfully!', 'success');
         resetForm();
@@ -612,30 +658,24 @@ const StockAdjustment = ({ onStockChanged }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <fieldset disabled={submitting} className="space-y-4">
-              
-              {/* Product Autocomplete Selection */}
+            <fieldset disabled={submitting} className="space-y-4">              {/* Product Autocomplete Selection */}
               <div className="relative">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Select Product *</label>
                 <div className="relative">
                   <input 
                     type="text"
-                    placeholder="Search product by name..."
+                    placeholder="Search product by name, SKU or barcode..."
                     value={searchProductQuery}
-                    onChange={(e) => {
-                      setSearchProductQuery(e.target.value);
-                      setShowProductDropdown(true);
-                    }}
+                    onChange={(e) => handleProductSearchChange(e.target.value)}
                     onFocus={() => setShowProductDropdown(true)}
-                    required
                     className="w-full pl-9 pr-8 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50 dark:bg-slate-955 font-bold text-slate-900 dark:text-white"
                   />
                   <MagnifyingGlassIcon className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   {searchProductQuery && (
                     <button 
                       type="button" 
-                      onClick={() => { setSearchProductQuery(''); setFormData(prev => ({ ...prev, productId: '' })); }} 
-                      className="text-[10px] text-slate-400 hover:text-slate-650 absolute right-3 top-2.5 font-bold"
+                      onClick={() => handleProductSearchChange('')} 
+                      className="text-[10px] text-slate-400 hover:text-slate-650 absolute right-3 top-2.5 font-bold cursor-pointer"
                     >
                       ✕
                     </button>
@@ -645,18 +685,37 @@ const StockAdjustment = ({ onStockChanged }) => {
                 {showProductDropdown && (
                   <div className="absolute z-30 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-lg max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                     {productList
-                      .filter(p => p.name.toLowerCase().includes(searchProductQuery.toLowerCase()))
+                      .filter(p => {
+                        const q = searchProductQuery.toLowerCase();
+                        return (
+                          (p.name && p.name.toLowerCase().includes(q)) ||
+                          (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+                          (p.sku && p.sku.toLowerCase().includes(q))
+                        );
+                      })
                       .map(prod => (
                         <div 
                           key={prod.id} 
                           onClick={() => handleSelectProduct(prod)}
-                          className="p-2.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer flex justify-between font-semibold"
+                          className="p-2.5 text-xs hover:bg-indigo-50 dark:hover:bg-slate-800/50 cursor-pointer flex justify-between items-center font-semibold"
                         >
-                          <span className="text-slate-900 dark:text-white">{prod.name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">Stock: {prod.stock || 0} {prod.unit || 'Pcs'}</span>
+                          <div>
+                            <span className="text-slate-900 dark:text-white font-bold block">{prod.name}</span>
+                            <span className="text-[9px] text-slate-400 font-mono">Barcode: {prod.barcode || prod.sku || 'N/A'}</span>
+                          </div>
+                          <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md text-slate-600 dark:text-slate-300 font-mono font-bold">
+                            Stock: {prod.stock ?? prod.total_stock ?? 0} {prod.unit || 'Pcs'}
+                          </span>
                         </div>
                       ))}
-                    {productList.filter(p => p.name.toLowerCase().includes(searchProductQuery.toLowerCase())).length === 0 && (
+                    {productList.filter(p => {
+                      const q = searchProductQuery.toLowerCase();
+                      return (
+                        (p.name && p.name.toLowerCase().includes(q)) ||
+                        (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+                        (p.sku && p.sku.toLowerCase().includes(q))
+                      );
+                    }).length === 0 && (
                       <div className="p-3 text-xs text-slate-400 text-center font-medium">No products found</div>
                     )}
                   </div>
@@ -689,7 +748,7 @@ const StockAdjustment = ({ onStockChanged }) => {
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Current Stock</label>
                   <input 
                     type="text" 
-                    value={selectedProductDetails ? `${selectedProductDetails.stock || 0} Pcs` : '—'} 
+                    value={selectedProductDetails ? `${selectedProductDetails.stock ?? selectedProductDetails.total_stock ?? 0} Pcs` : '—'} 
                     readOnly 
                     className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-500 font-mono font-bold"
                   />
@@ -820,8 +879,8 @@ const StockAdjustment = ({ onStockChanged }) => {
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="submit"
-                    disabled={submitting || !formData.productId || !formData.quantity}
-                    className="w-full py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:bg-slate-200 disabled:text-slate-400 cursor-pointer shadow-md shadow-indigo-500/20"
+                    disabled={submitting}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:bg-slate-200 disabled:text-slate-400 cursor-pointer shadow-md shadow-indigo-500/20"
                   >
                     {submitting ? 'Executing adjustment transaction...' : 'Save Stock Adjustment'}
                   </button>

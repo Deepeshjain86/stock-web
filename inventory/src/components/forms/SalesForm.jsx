@@ -1518,14 +1518,19 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
     /* ── Save New Customer directly ── */
     const handleAddNewCustomerSubmit = async (e) => {
         e.preventDefault();
-        if (!newCustName || !newCustPhone) {
+        const cleanedPhone = newCustPhone ? newCustPhone.replace(/\D/g, '') : '';
+        if (!newCustName || !cleanedPhone) {
             toast.error('Please provide customer name and mobile.');
+            return;
+        }
+        if (cleanedPhone.length !== 10) {
+            toast.error('Mobile number must be exactly 10 digits.');
             return;
         }
         try {
             const res = await customersAPI.create({
                 name: newCustName,
-                phone: newCustPhone,
+                phone: cleanedPhone,
                 address: newCustAddress || null,
                 customer_type: newCustType,
                 payment_mode: newCustPaymentMode,
@@ -2158,9 +2163,10 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                             />
                             <input
                                 type="text"
-                                placeholder="Mobile number (optional)"
+                                placeholder="Mobile number"
                                 value={customerPhone}
-                                onChange={(e) => setCustomerPhone(e.target.value)}
+                                onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                maxLength={10}
                                 className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors font-mono"
                             />
                         </div>
@@ -2741,7 +2747,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                         required
                                         value={newCustName}
                                         onChange={(e) => setNewCustName(e.target.value)}
-                                        placeholder="e.g. Rajesh Kumar"
+                                        placeholder="Name"
                                         className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors"
                                     />
                                 </div>
@@ -2754,8 +2760,9 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                         type="text"
                                         required
                                         value={newCustPhone}
-                                        onChange={(e) => setNewCustPhone(e.target.value)}
-                                        placeholder="e.g. 9876543210"
+                                        onChange={(e) => setNewCustPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                        maxLength={10}
+                                        placeholder="Mobile Number"
                                         className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors font-mono"
                                     />
                                 </div>
@@ -2768,7 +2775,7 @@ const SalesForm = ({ sale, onSubmit, onCancel }) => {
                                         type="text"
                                         value={newCustAddress}
                                         onChange={(e) => setNewCustAddress(e.target.value)}
-                                        placeholder="e.g. 123, Main Street, City"
+                                        placeholder="Address"
                                         className="w-full px-3 py-2 border border-gray-200 dark:border-slate-800 rounded-xl bg-gray-50 dark:bg-[#0d101a] text-gray-700 dark:text-slate-200 font-medium focus:outline-none focus:border-[#0F4C3A] dark:focus:border-emerald-500 transition-colors"
                                     />
                                 </div>
