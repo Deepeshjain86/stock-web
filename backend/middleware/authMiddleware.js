@@ -110,19 +110,27 @@ export const protect = async (req, res, next) => {
         user.permissions = [];
       }
 
-    if (user.status !== 'Active') {
-      return res.status(403).json({ success: false, message: 'Your account is suspended. Contact Administrator.' });
-    }
-
-    if (!db) {
-      db = getTenantPool(tenantDbName);
-    }
-
-    if (tenantDbName !== 'kirana_erp_master') {
-      await ensureTenantMigrations(tenantDbName);
-    }
-
     const effectiveTenantId = decoded.role === 'Super Admin' ? monitoredTenantId : decoded.tenantId;
+
+    if (user.status !== 'Active') {
+      if (effectiveTenantId) {
+        try {
+          const [tenants] = await masterPool.query('SELECT subscription_status FROM tenants WHERE id = ?', [effectiveTenantId]);
+          if (tenants.length > 0 && (tenants[0].subscription_status === 'Active' || tenants[0].subscription_status === 'Trial')) {
+            user.status = 'Active';
+            await masterPool.query('UPDATE users SET status = "Active" WHERE email = ? AND tenant_id = ?', [user.email, effectiveTenantId]);
+            if (db) {
+              await db.query('UPDATE users SET status = "Active" WHERE LOWER(email) = LOWER(?)', [user.email]);
+            }
+          }
+        } catch (healErr) {
+          console.warn('[Auth Middleware] Status auto-heal error:', healErr.message);
+        }
+      }
+      if (user.status !== 'Active') {
+        return res.status(403).json({ success: false, message: 'Your account is suspended. Contact Administrator.' });
+      }
+    }
 
     req.db = db;
     req.user = user;

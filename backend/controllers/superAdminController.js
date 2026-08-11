@@ -397,6 +397,37 @@ export const createStore = async (req, res, next) => {
 // @desc    Update tenant store attributes / subscription status
 // @route   PUT /api/superadmin/stores/:id
 // @access  Private (Super Admin only)
+// Helper to synchronize store subscription status and user status across Master DB and isolated Tenant DB
+export const syncTenantStoreAndUserStatus = async (tenantId, newSubscriptionStatus) => {
+  try {
+    const isStoreActive = newSubscriptionStatus === 'Active' || newSubscriptionStatus === 'Trial';
+    const targetUserStatus = isStoreActive ? 'Active' : 'Suspended';
+
+    // 1. Update masterPool tenants table
+    await masterPool.query('UPDATE tenants SET subscription_status = ? WHERE id = ?', [newSubscriptionStatus, tenantId]);
+
+    // 2. Update masterPool users table for all non-superadmin users under this tenant
+    await masterPool.query(
+      'UPDATE users SET status = ? WHERE tenant_id = ? AND role != "Super Admin"',
+      [targetUserStatus, tenantId]
+    );
+
+    // 3. Update isolated tenant DB users table
+    const [tenants] = await masterPool.query('SELECT database_name FROM tenants WHERE id = ?', [tenantId]);
+    if (tenants.length > 0 && tenants[0].database_name) {
+      const dbName = tenants[0].database_name;
+      try {
+        const tenantDb = getTenantPool(dbName);
+        await tenantDb.query('UPDATE users SET status = ?', [targetUserStatus]);
+      } catch (err) {
+        console.warn(`[Status Sync] Failed to sync tenant DB "${dbName}":`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error(`[Status Sync] Error syncing tenant status for ID ${tenantId}:`, err);
+  }
+};
+
 export const updateStore = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -434,11 +465,33 @@ export const updateStore = async (req, res, next) => {
       ]
     );
 
-    // Reflect status change globally in users table
-    if (subscription_status === 'Suspended' || subscription_status === 'Expired') {
-      await masterPool.query('UPDATE users SET status = "Suspended" WHERE tenant_id = ?', [id]);
-    } else if (subscription_status === 'Active' || subscription_status === 'Trial') {
-      await masterPool.query('UPDATE users SET status = "Active" WHERE tenant_id = ?', [id]);
+    // Reflect status change globally across Master DB and Tenant DB
+    if (subscription_status) {
+      await syncTenantStoreAndUserStatus(id, subscription_status);
+    }
+
+    // Update Admin password across Master DB and Tenant DB if provided in update payload
+    if (req.body.password && String(req.body.password).trim().length > 0) {
+      const newPassword = String(req.body.password).trim();
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+      // Update in Master DB users table
+      await masterPool.query('UPDATE users SET password = ? WHERE tenant_id = ? AND role = "Admin"', [hashedPassword, id]);
+
+      // Update in Tenant DB users table
+      const [tRows] = await masterPool.query('SELECT database_name FROM tenants WHERE id = ?', [id]);
+      if (tRows.length > 0 && tRows[0].database_name) {
+        try {
+          const tenantDb = getTenantPool(tRows[0].database_name);
+          await tenantDb.query(
+            'UPDATE users SET password = ? WHERE role_id = (SELECT id FROM roles WHERE name = "Admin" LIMIT 1) OR id = 1',
+            [hashedPassword]
+          );
+        } catch (pErr) {
+          console.warn('[UpdateStore] Tenant DB password update error:', pErr.message);
+        }
+      }
     }
 
     await logMasterActivity(req.user.id, 'Update Store Info', 'System', `Updated attributes and status for store ID: ${id}`, req.ip);
@@ -467,17 +520,11 @@ export const toggleStoreStatus = async (req, res, next) => {
     let newStatus = status;
 
     if (!newStatus) {
-      newStatus = (currentStatus === 'Inactive' || currentStatus === 'Disabled' || currentStatus === 'Suspended') ? 'Active' : 'Inactive';
+      newStatus = (currentStatus === 'Inactive' || currentStatus === 'Disabled' || currentStatus === 'Suspended') ? 'Active' : 'Suspended';
     }
 
-    // 1. Soft update status in Master database tenants table
-    await masterPool.query('UPDATE tenants SET subscription_status = ? WHERE id = ?', [newStatus, id]);
-
-    // 2. Synchronize user status in Master database users table
-    await masterPool.query(
-      'UPDATE users SET status = ? WHERE tenant_id = ? AND role != "Super Admin"', 
-      [newStatus === 'Active' ? 'Active' : 'Inactive', id]
-    );
+    // Synchronize store and user status across Master DB and Tenant DB
+    await syncTenantStoreAndUserStatus(id, newStatus);
 
     await logMasterActivity(
       req.user.id, 
@@ -620,22 +667,8 @@ export const handleSubscriptionAction = async (req, res, next) => {
       );
     }
 
-    // Update Master tenants table
-    await masterConn.query(
-      `UPDATE tenants 
-       SET subscription_status = ?, 
-           subscription_plan = ?, 
-           subscription_expires_at = ? 
-       WHERE id = ?`,
-      [newStatus, newPlan, newExpiry, id]
-    );
-
-    // Sync user statuses under this tenant
-    if (newStatus === 'Suspended' || newStatus === 'Expired') {
-      await masterConn.query('UPDATE users SET status = "Suspended" WHERE tenant_id = ?', [id]);
-    } else {
-      await masterConn.query('UPDATE users SET status = "Active" WHERE tenant_id = ?', [id]);
-    }
+    // Synchronize tenant store & user status across Master DB and Tenant DB
+    await syncTenantStoreAndUserStatus(id, newStatus);
 
     // Log action to subscription logs
     await masterConn.query(

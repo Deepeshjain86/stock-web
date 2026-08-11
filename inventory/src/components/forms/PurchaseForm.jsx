@@ -76,7 +76,8 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
         purchaseDate: purchaseOrder.date ? new Date(purchaseOrder.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         dueDate: purchaseOrder.expected_delivery_date ? new Date(purchaseOrder.expected_delivery_date).toISOString().split('T')[0] : '',
         items,
-        paymentMode: 'Cash',
+        paymentMode: 'Credit',
+        paymentStatus: 'Pending',
         transportCharge: '0',
         otherCharges: '0',
         discountAmount: String(purchaseOrder.discount || 0),
@@ -243,7 +244,7 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
     setFormData({
       vendor: '', vendorId: '', vendorContact: '', gstNumber: '',
       invoiceNo: '', purchaseDate: new Date().toISOString().split('T')[0],
-      dueDate: '', items: [], paymentMode: 'Cash',
+      dueDate: '', items: [], paymentMode: 'Credit', paymentStatus: 'Pending',
       transportCharge: '0', otherCharges: '0', discountAmount: '0', notes: '',
     });
     setErrors({});

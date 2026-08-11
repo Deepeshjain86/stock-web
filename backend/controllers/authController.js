@@ -57,13 +57,45 @@ export const login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials. Account not found.' });
     }
 
-    const globalUser = globalUsers[0];
+    let globalUser = globalUsers[0];
+
+    // Check Tenant Subscription status & Auto-Heal status when store is Active/Trial
+    if (globalUser.role !== 'Super Admin' && globalUser.tenant_id) {
+      const [tenants] = await masterPool.query('SELECT id, store_name, subscription_status, database_name FROM tenants WHERE id = ?', [globalUser.tenant_id]);
+      if (tenants.length > 0) {
+        const tenantObj = tenants[0];
+
+        // Block login if store is explicitly suspended or deactivated
+        if (tenantObj.subscription_status === 'Suspended' || tenantObj.subscription_status === 'Inactive' || tenantObj.subscription_status === 'Deactivated' || tenantObj.subscription_status === 'Disabled') {
+          return res.status(403).json({
+            success: false,
+            message: `Your store account is currently ${tenantObj.subscription_status.toLowerCase()}. Please contact the Super Admin.`
+          });
+        }
+
+        // Auto-heal status if store is Active or Trial but user status in DB was stale
+        if (tenantObj.subscription_status === 'Active' || tenantObj.subscription_status === 'Trial') {
+          if (globalUser.status !== 'Active') {
+            await masterPool.query('UPDATE users SET status = "Active" WHERE id = ?', [globalUser.id]);
+            globalUser.status = 'Active';
+          }
+          if (tenantObj.database_name) {
+            try {
+              const tenantDb = getTenantPool(tenantObj.database_name);
+              await tenantDb.query('UPDATE users SET status = "Active" WHERE LOWER(email) = LOWER(?) OR UPPER(login_id) = UPPER(?)', [globalUser.email, globalUser.login_id || globalUser.email]);
+            } catch (healErr) {
+              console.warn('[Auth Login] Status auto-heal error:', healErr.message);
+            }
+          }
+        }
+      }
+    }
 
     if (globalUser.status !== 'Active') {
       return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact your administrator.' });
     }
 
-    // Verify Password Hash strictly with Self-Healing Fallback
+    // Verify Password Hash strictly with Bidirectional Self-Healing
     let isMatch = await bcrypt.compare(inputPass, globalUser.password);
 
     if (!isMatch && globalUser.role !== 'Super Admin' && globalUser.tenant_id) {
@@ -86,6 +118,19 @@ export const login = async (req, res, next) => {
         }
       } catch (err) {
         console.warn('[Self-Healing Auth] Tenant DB fallback check:', err.message);
+      }
+    }
+
+    // Bidirectional sync: If masterPool password matched, ensure tenantDb password is also updated if different
+    if (isMatch && globalUser.role !== 'Super Admin' && globalUser.tenant_id) {
+      try {
+        const [tenants] = await masterPool.query('SELECT database_name FROM tenants WHERE id = ?', [globalUser.tenant_id]);
+        if (tenants.length > 0 && tenants[0].database_name) {
+          const tenantDb = getTenantPool(tenants[0].database_name);
+          await tenantDb.query('UPDATE users SET password = ? WHERE LOWER(email) = LOWER(?) OR UPPER(login_id) = UPPER(?)', [globalUser.password, globalUser.email, globalUser.login_id || globalUser.email]);
+        }
+      } catch (syncErr) {
+        // non-blocking
       }
     }
 

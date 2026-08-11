@@ -20,43 +20,6 @@ import { salesAPI, settingsAPI } from '../../services/api';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { fetchStockSummary, fetchStockAlerts } from '../../store/slices/stockSlice';
 
-const fallbackSalesData = [
-  {
-    id: 1,
-    invoiceNo: 'INV-2026-0001',
-    date: '2026-07-02',
-    customerName: 'Walk-in Customer',
-    productsSummary: 'Coca-Cola 1.5L (x2), Taj Mahal Tea (x1)',
-    quantity: 3,
-    subtotal: 365.00,
-    gst: 48.60,
-    discount: 15.00,
-    total: 398.60,
-    paymentMethod: 'UPI',
-    paymentStatus: 'Paid',
-    status: 'Completed',
-    warehouseName: 'Main Store Shelf',
-    time: '12:00 PM'
-  },
-  {
-    id: 2,
-    invoiceNo: 'INV-2026-0002',
-    date: '2026-07-03',
-    customerName: 'Rahul Sharma',
-    productsSummary: 'Maggi 2-Min Noodles (x1)',
-    quantity: 1,
-    subtotal: 230.00,
-    gst: 41.40,
-    discount: 0.00,
-    total: 271.40,
-    paymentMethod: 'Cash',
-    paymentStatus: 'Paid',
-    status: 'Completed',
-    warehouseName: 'Back Warehouse',
-    time: '04:30 PM'
-  }
-];
-
 const SalesList = () => {
   const { user } = useAppSelector((state) => state.auth);
   const dispatch = useAppDispatch();
@@ -261,11 +224,10 @@ const SalesList = () => {
         }));
         setSales(mapped);
       }
-      setDbOffline(false);
     } catch (err) {
-      console.warn('Sales API failed, loading fallback data.', err);
-      setDbOffline(true);
-      setSales(fallbackSalesData);
+      console.error('Sales API error:', err);
+      setDbOffline(false);
+      setSales([]);
     } finally {
       setLoading(false);
     }

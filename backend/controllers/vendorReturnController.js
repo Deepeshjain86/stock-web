@@ -106,20 +106,24 @@ export const getPurchasesForVendorProduct = async (req, res, next) => {
       });
     }
 
+    // Fetch current physical stock for the product
+    const [stockRec] = await req.db.query(
+      'SELECT COALESCE(SUM(quantity), 0) as currentStock FROM stock WHERE product_id = ?',
+      [Number(product_id)]
+    );
+    const currentStock = Number(stockRec[0]?.currentStock || 0);
+
     const [purchases] = await req.db.query(
       `SELECT pu.id as purchaseId, pu.purchase_no, pu.date, pu.payment_status,
               pi.purchase_price as purchasePrice, pi.quantity as purchasedQuantity,
               pi.gst,
-              COALESCE(
-                pi.quantity - COALESCE((
-                  SELECT SUM(pr.quantity)
-                  FROM purchase_returns pr
-                  WHERE pr.purchase_id = pu.id
-                    AND pr.product_id  = pi.product_id
-                    AND pr.status != 'Void'
-                ), 0),
-                0
-              ) as availableReturnQuantity
+              COALESCE((
+                SELECT SUM(pr.quantity)
+                FROM purchase_returns pr
+                WHERE pr.purchase_id = pu.id
+                  AND pr.product_id  = pi.product_id
+                  AND pr.status != 'Void'
+              ), 0) as returnedQuantity
        FROM purchase_items pi
        JOIN purchases pu ON pi.purchase_id = pu.id
        WHERE pu.vendor_id  = ?
@@ -128,14 +132,19 @@ export const getPurchasesForVendorProduct = async (req, res, next) => {
       [Number(vendor_id), Number(product_id)]
     );
 
-    // Fetch current stock for the product
-    const [stockRec] = await req.db.query(
-      'SELECT COALESCE(SUM(quantity), 0) as currentStock FROM stock WHERE product_id = ?',
-      [Number(product_id)]
-    );
-    const currentStock = Number(stockRec[0]?.currentStock || 0);
+    const mappedPurchases = purchases.map(p => {
+      const purchasedQty = Number(p.purchasedQuantity || 0);
+      const returnedQty = Number(p.returnedQuantity || 0);
+      const netPurchased = Math.max(0, purchasedQty - returnedQty);
+      // Available return quantity cannot exceed physical stock in hand!
+      const availableReturnQuantity = Math.max(0, Math.min(netPurchased, currentStock));
+      return {
+        ...p,
+        availableReturnQuantity
+      };
+    });
 
-    return res.status(200).json({ success: true, purchases, currentStock });
+    return res.status(200).json({ success: true, purchases: mappedPurchases, currentStock });
   } catch (error) {
     errLog('getPurchasesForVendorProduct', 'Failed to fetch purchase records for product', error);
     next(error);
@@ -177,14 +186,15 @@ export const getAvailableReturnStock = async (req, res, next) => {
       [Number(vendor_id), Number(product_id)]
     );
 
-    const available = Number(stock[0]?.available || 0);
+    const availableStock = Number(stock[0]?.available || 0);
     const totalPurchased = Number(purchases[0]?.totalPurchased || 0);
     const totalReturned = Number(returned[0]?.totalReturned || 0);
-    const maxReturnable = Math.max(0, totalPurchased - totalReturned);
+    // Capped by physical stock in hand!
+    const maxReturnable = Math.max(0, Math.min(totalPurchased - totalReturned, availableStock));
 
     return res.status(200).json({
       success: true,
-      availableStock: available,
+      availableStock: availableStock,
       maxReturnableQty: maxReturnable,
       totalPurchased,
       totalReturned
@@ -474,6 +484,7 @@ export const createVendorReturn = async (req, res, next) => {
         [pId]
       );
       const targetWarehouseId = stockRec.length > 0 ? stockRec[0].warehouse_id : null;
+      const currentStockQty = stockRec.length > 0 ? Number(stockRec[0].quantity || 0) : 0;
 
       if (!targetWarehouseId) {
         throw new Error(
@@ -481,7 +492,13 @@ export const createVendorReturn = async (req, res, next) => {
           `Ensure stock has been received before processing a return.`
         );
       }
-      log('createVendorReturn', `Target warehouse_id: ${targetWarehouseId}`);
+
+      if (retQty > currentStockQty) {
+        throw new Error(
+          `Cannot return ${retQty} units of "${productCheck[0].name}". Only ${currentStockQty} units are currently present in physical stock.`
+        );
+      }
+      log('createVendorReturn', `Target warehouse_id: ${targetWarehouseId}, Current stock: ${currentStockQty}`);
 
       // ── Step 2: Deduct Stock ─────────────────────────────────────────────
       log('createVendorReturn', `Deducting ${retQty} units from stock (product=${pId}, warehouse=${targetWarehouseId})`);
@@ -489,6 +506,19 @@ export const createVendorReturn = async (req, res, next) => {
         'UPDATE stock SET quantity = GREATEST(0, quantity - ?) WHERE product_id = ? AND warehouse_id = ?',
         [retQty, pId, targetWarehouseId]
       );
+
+      // ── Step 2b: Deduct Stock in purchase_batches table (so Products Page total_stock updates!) ──
+      try {
+        await connection.query(
+          `UPDATE purchase_batches 
+           SET remaining_quantity = GREATEST(0, remaining_quantity - ?) 
+           WHERE product_id = ? AND (supplier_id = ? OR purchase_id = ?) AND remaining_quantity > 0 
+           ORDER BY id DESC LIMIT 1`,
+          [retQty, pId, Number(vendor_id), purchase_id ? Number(purchase_id) : 0]
+        );
+      } catch (pbErr) {
+        log('createVendorReturn', 'Warning: Could not update purchase_batches', pbErr.message);
+      }
 
       // ── Step 3: Log Stock Movement ────────────────────────────────────────
       log('createVendorReturn', 'Inserting stock_logs entry');
@@ -540,18 +570,29 @@ export const createVendorReturn = async (req, res, next) => {
       }
     }
 
-    // ── Step 5: Update Vendor Financial Balance (outstanding_balance only) ──
-    // NOTE: advance_balance is NOT a stored column — it is computed dynamically
-    //       from (net_purchases - total_paid). We only update outstanding_balance
-    //       which IS stored in the vendors table.
-    log('createVendorReturn', `Updating vendor outstanding_balance. totalReturnVal=₹${totalReturnVal}`);
-    await connection.query(
-      `UPDATE vendors 
-       SET outstanding_balance = GREATEST(0, outstanding_balance - ?)
-       WHERE id = ?`,
-      [totalReturnVal, Number(vendor_id)]
-    );
-    log('createVendorReturn', 'Vendor outstanding_balance updated');
+    // ── Step 5: Update Vendor Financial Balance (Single Source of Truth) ──────────────────────
+    log('createVendorReturn', `Updating vendor balance. totalReturnVal=₹${totalReturnVal}`);
+    const [invSumSync] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [Number(vendor_id)]);
+    const [retSumSync] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [Number(vendor_id)]);
+    const [paySumSync] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [Number(vendor_id)]);
+    const [vRowSync] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [Number(vendor_id)]);
+
+    if (vRowSync.length > 0) {
+      const grossPSync = Number(invSumSync[0].total || 0);
+      const retPSync = Number(retSumSync[0].total || 0);
+      const netPSync = Math.max(0, grossPSync - retPSync);
+      const openBSync = vRowSync[0].opening_balance_type === 'Advance' ? -Number(vRowSync[0].opening_balance || 0) : Number(vRowSync[0].opening_balance || 0);
+      const totPaidSync = Number(paySumSync[0].total || 0);
+
+      const diffSync = (netPSync + openBSync) - totPaidSync;
+      const newOut = Math.max(0, diffSync);
+
+      await connection.query(
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+        [grossPSync, totPaidSync, newOut, Number(vendor_id)]
+      );
+    }
+    log('createVendorReturn', 'Vendor balance updated');
 
     // ── Commit Transaction ────────────────────────────────────────────────────
     await connection.commit();
@@ -652,14 +693,44 @@ export const deleteVendorReturn = async (req, res, next) => {
       [ret.quantity, ret.product_id, ret.warehouse_id]
     );
 
+    try {
+      if (ret.purchase_id) {
+        await connection.query(
+          'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE purchase_id = ? AND product_id = ?',
+          [ret.quantity, ret.purchase_id, ret.product_id]
+        );
+      } else {
+        await connection.query(
+          'UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE product_id = ? ORDER BY id DESC LIMIT 1',
+          [ret.quantity, ret.product_id]
+        );
+      }
+    } catch (pbErr) {}
+
     // Mark return as Void
     await connection.query('UPDATE purchase_returns SET status = ? WHERE id = ?', ['Void', id]);
 
-    // Restore vendor outstanding_balance
-    await connection.query(
-      'UPDATE vendors SET outstanding_balance = outstanding_balance + ? WHERE id = ?',
-      [Number(ret.total_amount), Number(ret.vendor_id)]
-    );
+    // Recalculate vendor financial balance (Single Source of Truth)
+    const [invSumSync] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [Number(ret.vendor_id)]);
+    const [retSumSync] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [Number(ret.vendor_id)]);
+    const [paySumSync] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [Number(ret.vendor_id)]);
+    const [vRowSync] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [Number(ret.vendor_id)]);
+
+    if (vRowSync.length > 0) {
+      const grossPSync = Number(invSumSync[0].total || 0);
+      const retPSync = Number(retSumSync[0].total || 0);
+      const netPSync = Math.max(0, grossPSync - retPSync);
+      const openBSync = vRowSync[0].opening_balance_type === 'Advance' ? -Number(vRowSync[0].opening_balance || 0) : Number(vRowSync[0].opening_balance || 0);
+      const totPaidSync = Number(paySumSync[0].total || 0);
+
+      const diffSync = (netPSync + openBSync) - totPaidSync;
+      const newOut = Math.max(0, diffSync);
+
+      await connection.query(
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+        [grossPSync, totPaidSync, newOut, Number(ret.vendor_id)]
+      );
+    }
 
     // Log stock reversal
     await connection.query(

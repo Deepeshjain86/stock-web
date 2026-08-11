@@ -29,20 +29,6 @@ import StatusBadge from '../../components/common/StatusBadge';
 import API, { reportsAPI, stockAPI, productsAPI, vendorsAPI, customersAPI, usersAPI, categoriesAPI, salesAPI, purchasesAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 
-// Static fallback data in case database is offline
-const fallbackInventoryReport = [
-  { sku: 'GRO-FORT-SOY', name: 'Fortune Soyabean Oil 1L', category: 'Spices & Groceries', purchase_price: 110.00, selling_price: 135.00, stock_level: 12, valuation: 1320.00 },
-  { sku: 'GRO-TATA-SLT', name: 'Tata Salt 1kg', category: 'Spices & Groceries', purchase_price: 20.00, selling_price: 26.00, stock_level: 115, valuation: 2300.00 }
-];
-
-const fallbackSalesReport = [
-  { invoice_no: 'INV-2026-0001', date: '2026-07-02', customer: 'Walk-in Customer', subtotal: 365.00, gst_amount: 48.60, discount: 15.00, total: 398.60, payment_method: 'UPI' }
-];
-
-const fallbackPurchaseReport = [
-  { purchase_no: 'PUR-001-2026', date: '2026-06-15', vendor: 'Balaji Wholesale Traders', subtotal: 7340.00, gst_amount: 1141.20, discount: 300.00, total: 8181.20, payment_status: 'Paid' }
-];
-
 const Reports = () => {
   const { user } = useAppSelector((state) => state.auth);
   const { isDarkMode } = useAppSelector((state) => state.theme);
@@ -240,16 +226,9 @@ const Reports = () => {
       }
       setDbOffline(false);
     } catch (err) {
-      console.warn(`Reports API for tab ${activeTab} failed, loading fallback.`, err);
-      setDbOffline(true);
-      if (activeTab === 'inventory') setDataList(fallbackInventoryReport);
-      else if (activeTab === 'sales') setDataList(fallbackSalesReport);
-      else if (activeTab === 'purchase') setDataList(fallbackPurchaseReport);
-      else if (activeTab === 'lowstock') {
-        setDataList([
-          { barcode: '8906007281224', name: 'Fortune Soyabean Oil 1L', min_stock: 5, current_stock: 2, reorder_status: 'Need Reorder' }
-        ]);
-      }
+      console.error(`Reports API for tab ${activeTab} failed:`, err);
+      setDataList([]);
+      setDbOffline(false);
     } finally {
       setLoading(false);
     }
@@ -780,7 +759,7 @@ const Reports = () => {
                         <span className={Number(analyticsData.kpis?.inventoryValue || 0) === Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0) ? "text-emerald-600 dark:text-emerald-400 font-bold" : "text-slate-500 dark:text-slate-400 font-semibold"}>
                           {Number(analyticsData.kpis?.inventoryValue || 0) === Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0)
                             ? `✓ Matches Net Purchases Subtotal 100%`
-                            : `+ Sold COGS (₹${Number(analyticsData.kpis?.cogs || 0).toLocaleString('en-IN')}) = Subtotal (₹${Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0).toLocaleString('en-IN')})`}
+                            : `Physical Stock Value: ₹${Number(analyticsData.kpis?.inventoryValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                         </span>
                         <span>GST Credit: +₹{Number(analyticsData.kpis?.stockGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Incl. Tax: ₹{(Number(analyticsData.kpis?.inventoryValue || 0) + Number(analyticsData.kpis?.stockGst || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
@@ -794,9 +773,14 @@ const Reports = () => {
                       </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
-                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Returns & Wastage Loss</h4>
-                      <p className="text-lg font-black text-rose-600 dark:text-rose-400 mt-1">₹{(Number(analyticsData.kpis?.salesReturns || 0) + Number(analyticsData.kpis?.stockDestroyCost || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1">Refunds & Stock Destroy</div>
+                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Returns & Wastage</h4>
+                      <p className="text-lg font-black text-amber-600 dark:text-amber-400 mt-1">
+                        ₹{(Number(analyticsData.kpis?.vendorReturns || 0) + Number(analyticsData.kpis?.salesReturns || 0) + Number(analyticsData.kpis?.stockDestroyCost || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
+                        <span className="text-amber-600 dark:text-amber-400 font-black">Supplier Returns: ₹{Number(analyticsData.kpis?.vendorReturns || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        <span>Customer Returns: ₹{Number(analyticsData.kpis?.salesReturns || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Destroy: ₹{Number(analyticsData.kpis?.stockDestroyCost || 0).toLocaleString('en-IN')}</span>
+                      </div>
                     </div>
                   </>
                 ) : (
@@ -865,6 +849,10 @@ const Reports = () => {
                               <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25}/>
                               <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                             </linearGradient>
+                            <linearGradient id="colorReturns" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                            </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} />
                           <XAxis
@@ -893,6 +881,7 @@ const Reports = () => {
                           {analyticsScope === 'overall' && (
                             <>
                               <Area type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
+                              <Area type="monotone" dataKey="returns" name="Purchase Returns Value" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorReturns)" />
                               <Area type="monotone" dataKey="profit" name="Net Profit" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
                             </>
                           )}

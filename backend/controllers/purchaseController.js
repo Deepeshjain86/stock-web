@@ -997,10 +997,11 @@ export const getPurchaseById = async (req, res, next) => {
 
     const purchase = purchases[0];
 
-    // Fetch items with already returned quantities
+    // Fetch items with already returned quantities & current physical stock
     const [items] = await req.db.query(`
       SELECT pi.*, pr.name as product_name, pr.unit,
-             COALESCE((SELECT SUM(quantity) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id), 0) as returnedQuantity
+             COALESCE((SELECT SUM(quantity) FROM purchase_returns WHERE purchase_id = pi.purchase_id AND product_id = pi.product_id AND status != 'Void'), 0) as returnedQuantity,
+             COALESCE((SELECT SUM(quantity) FROM stock WHERE product_id = pi.product_id), 0) as current_stock
       FROM purchase_items pi
       JOIN products pr ON pi.product_id = pr.id
       WHERE pi.purchase_id = ?
@@ -1139,8 +1140,7 @@ export const createPurchase = async (req, res, next) => {
       const itemMrp = Number(item.mrp || item.max_retail_price || defaultProdMrp);
       const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
       const itemPurchasePrice = item.purchase_price && Number(item.purchase_price) > 0 ? Number(item.purchase_price) : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice);
-      const itemGst = Number(item.gst || item.gst_rate || 0);
-      const itemQty = Number(item.quantity || 0);
+      const itemQty = Number(item.quantity_received ?? item.received_quantity ?? item.quantity ?? 0);
       const itemTotal = Number(item.total || (itemQty * itemPurchasePrice));
 
       await connection.query(
@@ -1202,24 +1202,93 @@ export const createPurchase = async (req, res, next) => {
       }
     }
 
-    // Update Vendor totals & outstanding balance
+    // Fetch current vendor totals & check existing advance balance BEFORE this purchase
+    const [invSumPre] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSumPre] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySumPre] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [vRowPre] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+    let existingAdvance = 0;
+    if (vRowPre.length > 0) {
+      const grossPre = Number(invSumPre[0].total || 0);
+      const retPre = Number(retSumPre[0].total || 0);
+      const netPre = Math.max(0, grossPre - retPre);
+      const openPre = vRowPre[0].opening_balance_type === 'Advance' ? -Number(vRowPre[0].opening_balance || 0) : Number(vRowPre[0].opening_balance || 0);
+      const totPaidPre = Number(paySumPre[0].total || 0);
+      const diffPre = (netPre + openPre) - totPaidPre;
+      if (diffPre < 0) {
+        existingAdvance = Math.abs(diffPre);
+      }
+    }
+
+    // Determine actual fresh cash paid for this purchase invoice (after applying existing advance credit)
+    let actualFreshPaid = initialPaid;
+    if (existingAdvance > 0 && initialPaid > 0) {
+      actualFreshPaid = Math.max(0, initialPaid - existingAdvance);
+    }
+
+    // Update Vendor totals
     await connection.query(
       `UPDATE vendors 
        SET total_purchases = COALESCE(total_purchases, 0) + ?,
            total_paid = COALESCE(total_paid, 0) + ?
        WHERE id = ?`,
-      [invoiceTotal, initialPaid, vendor_id]
+      [invoiceTotal, actualFreshPaid, vendor_id]
     );
 
-    // Fetch updated vendor totals & calculate outstanding balance
-    const [vRow] = await connection.query('SELECT total_purchases, total_paid, opening_balance FROM vendors WHERE id = ?', [vendor_id]);
-    if (vRow.length > 0) {
-      const totP = Number(vRow[0].total_purchases || 0);
-      const totPaid = Number(vRow[0].total_paid || 0);
-      const openBal = Number(vRow[0].opening_balance || 0);
-      const newBal = Math.max(0, (totP + openBal) - totPaid);
+    if (actualFreshPaid > 0) {
+      const year = new Date(date).getFullYear();
+      const [allPays] = await connection.query('SELECT payment_no FROM supplier_payments WHERE payment_no LIKE ?', [`VPAY-%-${year}`]);
+      let maxSeq = 0;
+      for (const row of allPays) {
+        if (row.payment_no) {
+          const parts = row.payment_no.split('-');
+          const seq = parseInt(parts[1], 10);
+          if (!isNaN(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+      const initialPayNo = `VPAY-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
 
-      await connection.query('UPDATE vendors SET outstanding_balance = ? WHERE id = ?', [newBal, vendor_id]);
+      await connection.query(
+        `INSERT INTO supplier_payments 
+          (payment_no, vendor_id, purchase_id, payment_date, amount, payment_mode, reference_no, remarks, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          initialPayNo,
+          vendor_id,
+          purchaseId,
+          date || new Date(),
+          actualFreshPaid,
+          payment_method || 'Cash',
+          `INIT-${purchaseNo}`,
+          `Initial Payment for ${purchaseNo}`,
+          req.user.id || 1
+        ]
+      );
+    }
+
+    // Fetch updated vendor totals & calculate outstanding balance (Single Source of Truth considering returns & advance credit)
+    const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+    if (vRow.length > 0) {
+      const grossP = Number(invSum[0].total || 0);
+      const retP = Number(retSum[0].total || 0);
+      const netP = Math.max(0, grossP - retP);
+      const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+      const totPaid = Number(paySum[0].total || 0);
+      
+      const diff = (netP + openBal) - totPaid;
+      const newBal = Math.max(0, diff);
+
+      await connection.query(
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+        [grossP, totPaid, newBal, vendor_id]
+      );
 
       // Save Purchase Invoice entry in vendor_ledger
       await connection.query(
@@ -1295,50 +1364,32 @@ export const deletePurchase = async (req, res, next) => {
     // Fetch items
     const [items] = await connection.query('SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ?', [id]);
 
-    // Reverse outstanding balance on deletion
-    let unpaidAmount = 0;
-    if (payment_status === 'Pending') {
-      unpaidAmount = Number(total);
-    } else if (payment_status === 'Partial') {
-      const paidAmount = purchases[0].paid_amount || (Number(total) / 2);
-      unpaidAmount = Math.max(0, Number(total) - paidAmount);
-    }
+    // Delete items, payments and invoice
+    await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
+    await connection.query('DELETE FROM supplier_payments WHERE purchase_id = ?', [id]);
+    await connection.query('DELETE FROM purchases WHERE id = ?', [id]);
 
-    if (unpaidAmount > 0) {
+    // Recalculate vendor balance using single source of truth
+    const [invSum] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSum] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySum] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const [vRow] = await connection.query('SELECT opening_balance, opening_balance_type FROM vendors WHERE id = ?', [vendor_id]);
+
+    if (vRow.length > 0) {
+      const grossP = Number(invSum[0].total || 0);
+      const retP = Number(retSum[0].total || 0);
+      const netP = Math.max(0, grossP - retP);
+      const openBal = vRow[0].opening_balance_type === 'Advance' ? -Number(vRow[0].opening_balance || 0) : Number(vRow[0].opening_balance || 0);
+      const totPaid = Number(paySum[0].total || 0);
+      
+      const diff = (netP + openBal) - totPaid;
+      const newBal = Math.max(0, diff);
+
       await connection.query(
-        'UPDATE vendors SET outstanding_balance = GREATEST(0, outstanding_balance - ?) WHERE id = ?',
-        [unpaidAmount, vendor_id]
+        'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
+        [grossP, totPaid, newBal, vendor_id]
       );
     }
-
-    // Reverse stocks (only if NOT linked to PO/GRN, since stock was managed by GRN)
-    if (!isLinkedToReceipt) {
-      for (const item of items) {
-        const [currentStock] = await connection.query(
-          'SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? AND vendor_id = ?',
-          [item.product_id, warehouse_id, vendor_id]
-        );
-
-        const stockQty = currentStock.length > 0 ? currentStock[0].quantity : 0;
-        const finalQty = Math.max(0, stockQty - item.quantity);
-
-        await connection.query(
-          'UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ? AND vendor_id = ?',
-          [finalQty, item.product_id, warehouse_id, vendor_id]
-        );
-
-        // Log reverse stock log
-        await connection.query(
-          `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id)
-           VALUES (?, ?, ?, 'Stock Out', ?, ?, ?, ?)`,
-          [item.product_id, warehouse_id, vendor_id, -item.quantity, purchase_no, 'Purchase Invoice Cancelled', req.user.id]
-        );
-      }
-    }
-
-    // Delete items and invoice
-    await connection.query('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
-    await connection.query('DELETE FROM purchases WHERE id = ?', [id]);
 
     await connection.commit();
 

@@ -299,19 +299,25 @@ export const getStockAlerts = async (req, res, next) => {
     `);
 
     const [nearExpiry] = await req.db.query(`
-      SELECT id as product_id, name as product_name, sku, barcode, expiry_date, unit
-      FROM products
-      WHERE expiry_date IS NOT NULL 
-        AND expiry_date > CURRENT_DATE() 
-        AND expiry_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
-      ORDER BY expiry_date ASC
+      SELECT p.id as product_id, p.name as product_name, p.sku, p.barcode, p.expiry_date, p.unit, COALESCE(SUM(s.quantity), 0) as current_stock
+      FROM products p
+      JOIN stock s ON p.id = s.product_id
+      WHERE p.expiry_date IS NOT NULL 
+        AND p.expiry_date > CURRENT_DATE() 
+        AND p.expiry_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)
+      GROUP BY p.id, p.name, p.sku, p.barcode, p.expiry_date, p.unit
+      HAVING current_stock > 0
+      ORDER BY p.expiry_date ASC
     `);
 
     const [expired] = await req.db.query(`
-      SELECT id as product_id, name as product_name, sku, barcode, expiry_date, unit
-      FROM products
-      WHERE expiry_date IS NOT NULL AND expiry_date <= CURRENT_DATE()
-      ORDER BY expiry_date ASC
+      SELECT p.id as product_id, p.name as product_name, p.sku, p.barcode, p.expiry_date, p.unit, COALESCE(SUM(s.quantity), 0) as current_stock
+      FROM products p
+      JOIN stock s ON p.id = s.product_id
+      WHERE p.expiry_date IS NOT NULL AND p.expiry_date <= CURRENT_DATE()
+      GROUP BY p.id, p.name, p.sku, p.barcode, p.expiry_date, p.unit
+      HAVING current_stock > 0
+      ORDER BY p.expiry_date ASC
     `);
 
     return res.status(200).json({

@@ -873,9 +873,24 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       ORDER BY p.date ASC
     `, purchParams);
 
+    let returnLabelExpr = "DATE_FORMAT(pr.created_at, '%Y-%m-%d')";
+    if (timeScale === 'monthly') {
+      returnLabelExpr = "DATE_FORMAT(pr.created_at, '%b %Y')";
+    } else if (timeScale === 'yearly') {
+      returnLabelExpr = "DATE_FORMAT(pr.created_at, '%Y')";
+    }
+
+    const [returnsTrend] = await db.query(`
+      SELECT ${returnLabelExpr} as label,
+             COALESCE(SUM(pr.total_amount), 0) as returns_val
+      FROM purchase_returns pr
+      WHERE pr.status != 'Cancelled'
+      GROUP BY label
+    `);
+
     const trendMap = {};
     salesTrend.forEach(row => {
-      trendMap[row.label] = { label: row.label, revenue: Number(row.revenue), expenses: 0, profit: Number(row.revenue) };
+      trendMap[row.label] = { label: row.label, revenue: Number(row.revenue), expenses: 0, returns: 0, profit: Number(row.revenue) };
     });
 
     purchTrend.forEach(row => {
@@ -883,7 +898,15 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
         trendMap[row.label].expenses = Number(row.expenses);
         trendMap[row.label].profit = Math.max(0, trendMap[row.label].revenue - Number(row.expenses));
       } else {
-        trendMap[row.label] = { label: row.label, revenue: 0, expenses: Number(row.expenses), profit: 0 };
+        trendMap[row.label] = { label: row.label, revenue: 0, expenses: Number(row.expenses), returns: 0, profit: 0 };
+      }
+    });
+
+    returnsTrend.forEach(row => {
+      if (trendMap[row.label]) {
+        trendMap[row.label].returns = Number(row.returns_val);
+      } else {
+        trendMap[row.label] = { label: row.label, revenue: 0, expenses: 0, returns: Number(row.returns_val), profit: 0 };
       }
     });
 
@@ -1033,18 +1056,34 @@ export const getInventorySummary = async (req, res, next) => {
 
     // 4. Stock & Inventory Value
     if (hasViewStock) {
-      // Total stock quantity sum
-      const [sQty] = await req.db.query('SELECT COALESCE(SUM(quantity), 0) as total FROM stock');
+      // Total stock quantity sum (Single Source of Truth aligned with Products Page)
+      const [sQty] = await req.db.query(`
+        SELECT COALESCE(SUM(total_stock), 0) as total FROM (
+          SELECT COALESCE(
+            (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
+            SUM(s.quantity),
+            0
+          ) as total_stock
+          FROM products p
+          LEFT JOIN stock s ON p.id = s.product_id
+          GROUP BY p.id
+        ) as temp
+      `);
       totalStockQty = Number(sQty[0]?.total || 0);
 
       // Low Stock count
       const [lowStock] = await req.db.query(`
         SELECT COUNT(*) as count FROM (
-          SELECT p.id
+          SELECT p.id,
+                 COALESCE(
+                   (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
+                   SUM(s.quantity),
+                   0
+                 ) as total_stock
           FROM products p
           LEFT JOIN stock s ON p.id = s.product_id
           GROUP BY p.id, p.min_stock
-          HAVING COALESCE(SUM(s.quantity), 0) <= p.min_stock AND COALESCE(SUM(s.quantity), 0) > 0
+          HAVING total_stock <= p.min_stock AND total_stock > 0
         ) as temp
       `);
       lowStockProducts = lowStock[0]?.count || 0;
@@ -1052,11 +1091,16 @@ export const getInventorySummary = async (req, res, next) => {
       // Out of Stock count
       const [outOfStock] = await req.db.query(`
         SELECT COUNT(*) as count FROM (
-          SELECT p.id
+          SELECT p.id,
+                 COALESCE(
+                   (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
+                   SUM(s.quantity),
+                   0
+                 ) as total_stock
           FROM products p
           LEFT JOIN stock s ON p.id = s.product_id
           GROUP BY p.id
-          HAVING COALESCE(SUM(s.quantity), 0) = 0
+          HAVING total_stock = 0
         ) as temp
       `);
       outOfStockProducts = outOfStock[0]?.count || 0;

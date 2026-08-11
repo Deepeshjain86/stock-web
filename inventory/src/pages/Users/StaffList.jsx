@@ -213,27 +213,11 @@ const StaffList = () => {
           setDbPermissions(rolesRes.allPermissions);
         }
       }
-      setDbOffline(false);
     } catch (err) {
-      console.warn('Backend user APIs failing, using local simulation fallback.', err);
-      setDbOffline(true);
+      console.error('Staff API error:', err);
+      setDbOffline(false);
       setUsers([]);
-      if (user?.role === 'Admin') {
-        setRoles([
-          { id: 2, name: 'Purchase Manager' },
-          { id: 3, name: 'Sales Manager' }
-        ]);
-      } else if (user?.role === 'Purchase Manager') {
-        setRoles([
-          { id: 4, name: 'Purchase Employee' }
-        ]);
-      } else if (user?.role === 'Sales Manager') {
-        setRoles([
-          { id: 5, name: 'Sales Employee' }
-        ]);
-      } else {
-        setRoles([]);
-      }
+      setRoles([]);
     } finally {
       setLoading(false);
     }

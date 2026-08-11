@@ -150,11 +150,9 @@ const Settings = () => {
         const logsRes = await usersAPI.getActivityLogs();
         if (logsRes.success) setAuditLogs(logsRes.logs);
       }
-      setDbOffline(false);
     } catch (err) {
-      console.warn(`Settings API for tab ${activeSubTab} failed, loading offline mocks.`, err);
-      setDbOffline(true);
-      loadOfflineFallbackData();
+      console.error(`Settings API for tab ${activeSubTab} failed:`, err);
+      setDbOffline(false);
     } finally {
       setLoading(false);
     }

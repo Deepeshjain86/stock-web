@@ -31,13 +31,6 @@ import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { fetchStockSummary, fetchStockAlerts } from '../../store/slices/stockSlice';
 import { fetchProducts } from '../../store/slices/productSlice';
 
-const fallbackProducts = [
-  { id: 1, name: 'Fortune Soyabean Oil 1L', sku: 'GRO-FORT-SOY', category: 'Spices & Groceries', brand: 'Fortune', currentStock: 12, minimumStock: 5, warehouse: 'Main Storage', status: 'In Stock', purchasePrice: 110 },
-  { id: 2, name: 'Tata Salt 1kg', sku: 'GRO-TATA-SLT', category: 'Spices & Groceries', brand: 'Tata', currentStock: 115, minimumStock: 5, warehouse: 'Main Storage', status: 'In Stock', purchasePrice: 20 },
-  { id: 3, name: 'Maggi 2-Min Noodles 12-Pack', sku: 'SNA-MAGG-12P', category: 'Snacks & Packaged Foods', brand: 'Nestle', currentStock: 47, minimumStock: 5, warehouse: 'Main Storage', status: 'In Stock', purchasePrice: 145 },
-  { id: 5, name: 'Amul Fresh Cream 250ml', sku: 'DY-AMUL-CRM', category: 'Dairy & Bakery', brand: 'Amul', currentStock: 29, minimumStock: 5, warehouse: 'Cold Storage', status: 'Near Expiry', purchasePrice: 48 }
-];
-
 const StockDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -136,11 +129,10 @@ const StockDashboard = () => {
 
         setStockSummary(mapped);
       }
-      setDbOffline(false);
     } catch (err) {
-      console.warn('Stock APIs failed, loading fallback data.', err);
-      setDbOffline(true);
-      setStockSummary(fallbackProducts);
+      console.error('Stock APIs error:', err);
+      setDbOffline(false);
+      setStockSummary([]);
     } finally {
       setLoading(false);
     }

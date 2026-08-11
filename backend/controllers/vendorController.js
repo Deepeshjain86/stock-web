@@ -36,8 +36,8 @@ export const getVendors = async (req, res, next) => {
     const [vendors] = await req.db.query(queryStr, queryParams);
 
     const processed = vendors.map(v => {
-      const grossPurchases = Number(v.total_purchases_calc || 0);
-      const totalPaid = Number(v.total_paid_calc || 0);
+      const grossPurchases = Number(v.total_purchases_calc || v.total_purchases || 0);
+      const totalPaid = Number(v.total_paid_calc || v.total_paid || 0);
       const totalReturns = Number(v.total_returns_calc || 0);
       const netPurchases = Math.max(0, grossPurchases - totalReturns);
       const openingBal = v.opening_balance_type === 'Advance' ? -Number(v.opening_balance || 0) : Number(v.opening_balance || 0);
@@ -474,11 +474,20 @@ export const getVendorLedger = async (req, res, next) => {
       [id]
     );
 
-    // 2. Fetch Payments
+    // 2. Fetch Payments, Refunds & Adjustments
     const [payments] = await req.db.query(
-      `SELECT sp.id, sp.payment_no as reference_no, sp.payment_date as date, 0.00 as debit_amount, sp.amount as credit_amount,
-              'SUPPLIER_PAYMENT' as transaction_type, sp.payment_mode, sp.reference_no as mode_ref,
-              CONCAT('Supplier Payment via ', sp.payment_mode, IF(sp.reference_no IS NOT NULL AND sp.reference_no != '', CONCAT(' (Ref: ', sp.reference_no, ')'), '')) as description,
+      `SELECT sp.id, sp.payment_no as reference_no, sp.payment_date as date, 
+              IF(sp.amount < 0, ABS(sp.amount), 0.00) as debit_amount, 
+              IF(sp.amount >= 0, sp.amount, 0.00) as credit_amount,
+              IF(sp.payment_no LIKE 'VREF-%', 'SUPPLIER_REFUND', IF(sp.amount < 0, 'DEBT_ADJUSTMENT', 'SUPPLIER_PAYMENT')) as transaction_type, 
+              sp.payment_mode, sp.reference_no as mode_ref,
+              IF(sp.payment_no LIKE 'VREF-%',
+                 CONCAT('Cash Refund Received from Supplier via ', sp.payment_mode, IF(sp.reference_no IS NOT NULL AND sp.reference_no != '', CONCAT(' (Ref: ', sp.reference_no, ')'), '')),
+                 IF(sp.amount < 0, 
+                    CONCAT('Supplier Payable Charge Addition', IF(sp.remarks IS NOT NULL AND sp.remarks != '', CONCAT(' (', sp.remarks, ')'), '')),
+                    CONCAT('Supplier Payment via ', sp.payment_mode, IF(sp.reference_no IS NOT NULL AND sp.reference_no != '', CONCAT(' (Ref: ', sp.reference_no, ')'), ''))
+                 )
+              ) as description,
               sp.created_at, sp.purchase_id
        FROM supplier_payments sp
        WHERE sp.vendor_id = ?`,
@@ -639,7 +648,7 @@ export const getVendorInvoices = async (req, res, next) => {
   }
 };
 
-// @desc    Record Supplier Payment (Full / Partial)
+// @desc    Record Supplier Payment, Cash Refund Received, or Debt Adjustment
 // @route   POST /api/vendors/:id/payments
 // @access  Private (Admin, Manager)
 export const recordSupplierPayment = async (req, res, next) => {
@@ -651,6 +660,7 @@ export const recordSupplierPayment = async (req, res, next) => {
     const {
       purchase_id,
       amount,
+      entry_type, // 'PAYMENT' (Payment Paid), 'REFUND' (Cash Refund Received), 'ADD_DEBT' (Add Debt)
       payment_date,
       payment_mode,
       reference_no,
@@ -658,10 +668,12 @@ export const recordSupplierPayment = async (req, res, next) => {
       remarks
     } = req.body;
 
-    const payAmount = Number(amount);
-    if (!payAmount || payAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'Please enter a valid payment amount greater than zero.' });
+    const rawAmount = Number(amount);
+    if (!rawAmount || isNaN(rawAmount)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid numeric payment or charge amount.' });
     }
+
+    const absAmount = Math.abs(rawAmount);
 
     const [vendorRows] = await connection.query('SELECT * FROM vendors WHERE id = ?', [vendor_id]);
     if (vendorRows.length === 0) {
@@ -669,9 +681,52 @@ export const recordSupplierPayment = async (req, res, next) => {
     }
     const vendor = vendorRows[0];
 
-    // Generate Payment Reference Number
+    // Check current balance state for the supplier
+    const [allInvCheck] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ?', [vendor_id]);
+    const [allRetCheck] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ?', [vendor_id]);
+    const [allPayCheck] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
+    const netPurchasesCheck = Math.max(0, Number(allInvCheck[0].total || 0) - Number(allRetCheck[0].total || 0));
+    const openingBalCheck = vendor.opening_balance_type === 'Advance' ? -Number(vendor.opening_balance || 0) : Number(vendor.opening_balance || 0);
+    const currentDiff = (netPurchasesCheck + openingBalCheck) - Number(allPayCheck[0].total || 0);
+
+    let storedAmount = 0;
+    let isRefund = false;
+    let isAddDebt = false;
+
+    if (entry_type === 'SUBTRACT' || entry_type === 'SUB') {
+      if (currentDiff < 0) {
+        // Vendor has Advance Credit. Subtracting decreases Advance Credit towards 0
+        storedAmount = -absAmount;
+        isRefund = true;
+      } else {
+        // Vendor has Outstanding Debt. Subtracting decreases Debt towards 0
+        storedAmount = absAmount;
+        isRefund = false;
+      }
+    } else if (entry_type === 'ADD') {
+      if (currentDiff < 0) {
+        // Vendor has Advance Credit. Adding increases Advance Credit
+        storedAmount = absAmount;
+        isRefund = false;
+      } else {
+        // Vendor has Outstanding Debt. Adding increases Debt
+        storedAmount = -absAmount;
+        isAddDebt = true;
+      }
+    } else if (entry_type === 'REFUND') {
+      storedAmount = -absAmount;
+      isRefund = true;
+    } else if (entry_type === 'ADD_DEBT' || entry_type === 'DEBT_ADD') {
+      storedAmount = -absAmount;
+      isAddDebt = true;
+    } else {
+      storedAmount = absAmount;
+    }
+
+    // Generate Reference Number Prefix
     const year = new Date(payment_date || Date.now()).getFullYear();
-    const [allPays] = await connection.query('SELECT payment_no FROM supplier_payments WHERE payment_no LIKE ?', [`VPAY-%-${year}`]);
+    const prefix = isRefund ? 'VREF' : (isAddDebt ? 'VCHG' : 'VPAY');
+    const [allPays] = await connection.query('SELECT payment_no FROM supplier_payments WHERE payment_no LIKE ?', [`${prefix}-%-${year}`]);
     let maxSeq = 0;
     for (const row of allPays) {
       if (row.payment_no) {
@@ -682,9 +737,9 @@ export const recordSupplierPayment = async (req, res, next) => {
         }
       }
     }
-    const paymentNo = `VPAY-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
+    const paymentNo = `${prefix}-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
 
-    // Insert Payment Record
+    // Insert Payment / Refund Record
     const [payResult] = await connection.query(
       `INSERT INTO supplier_payments 
         (payment_no, vendor_id, purchase_id, payment_date, amount, payment_mode, reference_no, bank_account, remarks, created_by)
@@ -694,7 +749,7 @@ export const recordSupplierPayment = async (req, res, next) => {
         vendor_id,
         purchase_id || null,
         payment_date || new Date(),
-        payAmount,
+        storedAmount,
         payment_mode || 'Cash',
         reference_no || null,
         bank_account || null,
@@ -705,97 +760,129 @@ export const recordSupplierPayment = async (req, res, next) => {
 
     const paymentId = payResult.insertId;
 
-    // Distribute Payment to Purchases
-    if (purchase_id) {
-      const [pRows] = await connection.query('SELECT id, total, COALESCE(paid_amount, 0) as paid_amount FROM purchases WHERE id = ? AND vendor_id = ?', [purchase_id, vendor_id]);
-      if (pRows.length > 0) {
-        const p = pRows[0];
-        const newPaid = Number(p.paid_amount || 0) + payAmount;
-        const pTotal = Number(p.total || 0);
-        let newStatus = 'Pending';
-        if (newPaid >= pTotal) {
-          newStatus = 'Paid';
-        } else if (newPaid > 0) {
-          newStatus = 'Partial';
-        }
-
-        await connection.query(
-          'UPDATE purchases SET paid_amount = ?, payment_status = ? WHERE id = ?',
-          [newPaid, newStatus, purchase_id]
-        );
-      }
-    } else {
-      // FIFO bulk allocation across unpaid purchases
-      let remainingToAllocate = payAmount;
-      const [unpaidInvoices] = await connection.query(
-        `SELECT id, total, COALESCE(paid_amount, 0) as paid_amount 
-         FROM purchases 
-         WHERE vendor_id = ? AND payment_status IN ('Pending', 'Partial') 
-         ORDER BY date ASC, created_at ASC`,
-        [vendor_id]
-      );
-
-      for (const inv of unpaidInvoices) {
-        if (remainingToAllocate <= 0) break;
-        const invTotal = Number(inv.total || 0);
-        const invPaid = Number(inv.paid_amount || 0);
-        const invDue = invTotal - invPaid;
-
-        if (invDue > 0) {
-          const alloc = Math.min(remainingToAllocate, invDue);
-          const updatedPaid = invPaid + alloc;
-          const updatedStatus = updatedPaid >= invTotal ? 'Paid' : 'Partial';
+    if (!isRefund && !isAddDebt) {
+      // Distribute Payment to Purchases (Only for PAYMENT / Payment Paid)
+      if (purchase_id) {
+        const [pRows] = await connection.query('SELECT id, total, COALESCE(paid_amount, 0) as paid_amount FROM purchases WHERE id = ? AND vendor_id = ?', [purchase_id, vendor_id]);
+        if (pRows.length > 0) {
+          const p = pRows[0];
+          const newPaid = Number(p.paid_amount || 0) + absAmount;
+          const pTotal = Number(p.total || 0);
+          let newStatus = 'Pending';
+          if (newPaid >= pTotal) {
+            newStatus = 'Paid';
+          } else if (newPaid > 0) {
+            newStatus = 'Partial';
+          }
 
           await connection.query(
             'UPDATE purchases SET paid_amount = ?, payment_status = ? WHERE id = ?',
-            [updatedPaid, updatedStatus, inv.id]
+            [newPaid, newStatus, purchase_id]
           );
+        }
+      } else {
+        // FIFO bulk allocation across unpaid purchases
+        let remainingToAllocate = absAmount;
+        const [unpaidInvoices] = await connection.query(
+          `SELECT id, total, COALESCE(paid_amount, 0) as paid_amount 
+           FROM purchases 
+           WHERE vendor_id = ? AND payment_status IN ('Pending', 'Partial') 
+           ORDER BY date ASC, created_at ASC`,
+          [vendor_id]
+        );
 
-          remainingToAllocate -= alloc;
+        for (const inv of unpaidInvoices) {
+          if (remainingToAllocate <= 0) break;
+          const invTotal = Number(inv.total || 0);
+          const invPaid = Number(inv.paid_amount || 0);
+          const invDue = invTotal - invPaid;
+
+          if (invDue > 0) {
+            const alloc = Math.min(remainingToAllocate, invDue);
+            const updatedPaid = invPaid + alloc;
+            const updatedStatus = updatedPaid >= invTotal ? 'Paid' : 'Partial';
+
+            await connection.query(
+              'UPDATE purchases SET paid_amount = ?, payment_status = ? WHERE id = ?',
+              [updatedPaid, updatedStatus, inv.id]
+            );
+
+            remainingToAllocate -= alloc;
+          }
         }
       }
     }
 
-    // Update Vendor Aggregate Totals & Outstanding Balance
-    const [allInvoices] = await connection.query('SELECT COALESCE(SUM(total), 0) as sum_total FROM purchases WHERE vendor_id = ?', [vendor_id]);
-    const [allPayments] = await connection.query('SELECT COALESCE(SUM(amount), 0) as sum_paid FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
-    const [allReturns] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as sum_returns FROM purchase_returns WHERE vendor_id = ?', [vendor_id]);
+    // Single Source of Truth Supplier Balance Engine
+    const [invSumSync] = await connection.query('SELECT COALESCE(SUM(total), 0) as total FROM purchases WHERE vendor_id = ? AND payment_status != "Void"', [vendor_id]);
+    const [retSumSync] = await connection.query('SELECT COALESCE(SUM(total_amount), 0) as total FROM purchase_returns WHERE vendor_id = ? AND status != "Void"', [vendor_id]);
+    const [paySumSync] = await connection.query('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE vendor_id = ?', [vendor_id]);
 
-    const totalPurchases = Number(allInvoices[0].sum_total || 0);
-    const totalPaid = Number(allPayments[0].sum_paid || 0);
-    const totalReturns = Number(allReturns[0].sum_returns || 0);
-    const openingBal = Number(vendor.opening_balance || 0);
-    const newOutstanding = Math.max(0, (totalPurchases + openingBal) - (totalPaid + totalReturns));
+    const grossPSync = Number(invSumSync[0].total || 0);
+    const retPSync = Number(retSumSync[0].total || 0);
+    const netPSync = Math.max(0, grossPSync - retPSync);
+    const openBSync = vendor.opening_balance_type === 'Advance' ? -Number(vendor.opening_balance || 0) : Number(vendor.opening_balance || 0);
+    const totPaidSync = Number(paySumSync[0].total || 0);
+
+    const totalObligationSync = netPSync + openBSync;
+    const diffSync = totalObligationSync - totPaidSync;
+
+    let newOutstanding = 0;
+    if (diffSync > 0) {
+      newOutstanding = Number(diffSync.toFixed(2));
+    }
 
     await connection.query(
       'UPDATE vendors SET total_purchases = ?, total_paid = ?, outstanding_balance = ? WHERE id = ?',
-      [totalPurchases, totalPaid, newOutstanding, vendor_id]
+      [grossPSync, totPaidSync, newOutstanding, vendor_id]
     );
 
     // Save Vendor Ledger entry
+    const debitAmt = (isRefund || isAddDebt) ? absAmount : 0.00;
+    const creditAmt = (isRefund || isAddDebt) ? 0.00 : absAmount;
+    const transType = (isRefund || isAddDebt) ? 'ADJUSTMENT' : 'SUPPLIER_PAYMENT';
+    const descText = isRefund
+      ? `Cash Refund Received from Supplier via ${payment_mode || 'Cash'}${reference_no ? ` (Ref: ${reference_no})` : ''}`
+      : isAddDebt
+      ? `Supplier Payable Charge Addition${remarks ? ` (${remarks})` : ''}`
+      : `Supplier Payment via ${payment_mode || 'Cash'}${reference_no ? ` (Ref: ${reference_no})` : ''}`;
+
     await connection.query(
       `INSERT INTO vendor_ledger 
         (vendor_id, purchase_id, payment_id, date, transaction_type, reference_no, description, debit_amount, credit_amount, running_balance)
-       VALUES (?, ?, ?, ?, 'SUPPLIER_PAYMENT', ?, ?, 0.00, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vendor_id,
         purchase_id || null,
         paymentId,
         payment_date || new Date(),
+        transType,
         paymentNo,
-        `Supplier Payment via ${payment_mode || 'Cash'}${reference_no ? ` (Ref: ${reference_no})` : ''}`,
-        payAmount,
+        descText,
+        debitAmt,
+        creditAmt,
         newOutstanding
       ]
     );
 
     await connection.commit();
 
+    const actionText = isRefund 
+      ? 'Supplier Cash Refund Received' 
+      : isAddDebt 
+      ? 'Supplier Debt Added (+)' 
+      : 'Supplier Payment Recorded (-)';
+    const msgText = isRefund
+      ? `Cash Refund of ₹${absAmount.toLocaleString('en-IN')} received from Supplier "${vendor.name}" (${paymentNo}).`
+      : isAddDebt
+      ? `Debt/Charge of ₹${absAmount.toLocaleString('en-IN')} added to "${vendor.name}" (${paymentNo}).`
+      : `Payment of ₹${absAmount.toLocaleString('en-IN')} recorded for "${vendor.name}" (${paymentNo}).`;
+
     await logActivity({
       userId: req.user.id,
-      action: 'Supplier Payment Recorded',
+      action: actionText,
       module: 'Vendors',
-      details: `Paid ₹${payAmount} to Supplier "${vendor.name}" via ${payment_mode} (Ref: ${paymentNo})`,
+      details: msgText,
       recordId: paymentNo,
       status: 'Success'
     });
@@ -804,8 +891,8 @@ export const recordSupplierPayment = async (req, res, next) => {
       tenantId: req.tenantId,
       user_id: req.user.id,
       type: 'Supplier Payment',
-      title: 'Supplier Payment Recorded',
-      message: `Payment of ₹${payAmount.toLocaleString('en-IN')} recorded for "${vendor.name}" (${paymentNo}).`,
+      title: actionText,
+      message: msgText,
       priority: 'Medium',
       related_user: req.user.name || req.user.email,
       module: 'Supplier',
@@ -817,7 +904,7 @@ export const recordSupplierPayment = async (req, res, next) => {
 
     return res.status(201).json({
       success: true,
-      message: `Payment of ₹${payAmount.toLocaleString('en-IN')} recorded successfully!`,
+      message: msgText,
       paymentNo,
       paymentId
     });

@@ -576,11 +576,11 @@ const PurchaseOrderList = () => {
                           </button>
                         )}
 
-                        {/* Invoice conversion */}
-                        {!isReadOnly && ['Confirmed', 'Partially Received', 'Completed'].includes(po.status) && (
+                        {/* Invoice conversion - Available on all active PO statuses */}
+                        {!isReadOnly && ['Draft', 'Sent', 'Confirmed', 'Partially Received', 'Completed'].includes(po.status) && (
                           <button
                             onClick={() => handleOpenInvoice(po)}
-                            title="Create Invoice (PI)"
+                            title="Create Invoice (PI) - Update Supplier Balance & Stock"
                             className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg active:scale-90 transition-all cursor-pointer"
                           >
                             <CurrencyRupeeIcon className="w-4 h-4 stroke-[2]" />
@@ -843,26 +843,31 @@ const PurchaseOrderList = () => {
             </div>
 
             {/* Footer Actions */}
-            <div className="bg-white border-t border-slate-200/80 px-6 py-4 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400">This is an official system-generated Purchase Order sheet.</span>
+            <div className="bg-white border-t border-slate-200/80 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl">
+                <span className="text-xs">💡</span>
+                <span className="text-[11px] font-semibold text-indigo-900">
+                  Purchase Order is an order request. Click <strong>Convert to Invoice</strong> to post bill &amp; update supplier balance.
+                </span>
+              </div>
               <div className="flex items-center gap-2">
+                {!isReadOnly && (
+                  <button
+                    onClick={() => {
+                      const poToConvert = viewingPO;
+                      setViewingPO(null);
+                      handleOpenInvoice(poToConvert);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all active:scale-95 cursor-pointer"
+                  >
+                    <CurrencyRupeeIcon className="w-4 h-4 text-white stroke-[2.5]" /> Convert to Invoice (PI)
+                  </button>
+                )}
                 <button
                   onClick={() => handlePrintPO(viewingPO)}
                   className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-soft transition-all active:scale-95 cursor-pointer"
                 >
                   <PrinterIcon className="w-4 h-4 text-emerald-100 stroke-[2.5]" /> Print Order
-                </button>
-                <button
-                  onClick={() => handlePrintPO(viewingPO)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
-                >
-                  Download PDF
-                </button>
-                <button
-                  onClick={() => handleSharePO(viewingPO)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
-                >
-                  Share to Vendor
                 </button>
                 <button
                   onClick={() => setViewingPO(null)}

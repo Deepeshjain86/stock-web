@@ -77,45 +77,6 @@ const StockAdjustment = ({ onStockChanged }) => {
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null });
   const [toastAlert, setToastAlert] = useState({ show: false, message: '', type: 'success' });
 
-  // Fallback Data
-  const fallbackProducts = [
-    { id: 1, name: 'Fortune Soyabean Oil 1L', sku: 'GRO-FORT-SOY', barcode: '890123400122', category: 'Grocery', unit: 'Bottles', stock: 45, expiry_date: '2027-02-15' },
-    { id: 2, name: 'Tata Salt 1kg', sku: 'GRO-TATA-SLT', barcode: '890123400233', category: 'Grocery', unit: 'Packets', stock: 120 },
-    { id: 3, name: 'Maggi 2-Min Noodles 12-Pack', sku: 'SNA-MAGG-12P', barcode: '890123400344', category: 'Snacks', unit: 'Packets', stock: 12, expiry_date: '2026-08-10' },
-    { id: 4, name: 'Amul Butter 500g', sku: 'DAI-AMUL-BTR', barcode: '890123400455', category: 'Dairy', unit: 'Blocks', stock: 8, expiry_date: '2026-09-05' }
-  ];
-
-  const fallbackLogs = [
-    { 
-      id: 1, 
-      created_at: new Date().toISOString(), 
-      product_name: 'Fortune Soyabean Oil 1L', 
-      sku: 'GRO-FORT-SOY', 
-      category_name: 'Grocery',
-      barcode: '890123400122',
-      quantity: 5, 
-      type: 'add',
-      previous_quantity: 40,
-      new_quantity: 45,
-      notes: 'Reason: Physical Stock Count | Remarks: Weekly review | Batch: B-SOY-90A | Mfg: 2026-01-15 | Exp: 2027-02-15', 
-      user_name: 'Store Manager'
-    },
-    { 
-      id: 2, 
-      created_at: new Date(Date.now() - 3600000 * 5).toISOString(), 
-      product_name: 'Maggi 2-Min Noodles 12-Pack', 
-      sku: 'SNA-MAGG-12P', 
-      category_name: 'Snacks',
-      barcode: '890123400344',
-      quantity: -4, 
-      type: 'subtract',
-      previous_quantity: 16,
-      new_quantity: 12,
-      notes: 'Reason: Expired Product | Remarks: Write-off spoiled stock | Batch: B-MAG-22 | Mfg: 2025-08-10 | Exp: 2026-05-10', 
-      user_name: 'Ramesh Sharma'
-    }
-  ];
-
   // Helper to parse notes structured string
   const parseNotes = (notesStr) => {
     const details = {
@@ -154,12 +115,11 @@ const StockAdjustment = ({ onStockChanged }) => {
       if (logsRes.success) {
         setRecords(logsRes.logs);
       }
-      setDbOffline(false);
     } catch (err) {
-      console.warn('API connection failed, loading fallback data.', err);
-      setDbOffline(true);
-      setProductList(fallbackProducts);
-      setRecords(fallbackLogs);
+      console.error('StockAdjustment API error:', err);
+      setDbOffline(false);
+      setProductList([]);
+      setRecords([]);
     } finally {
       setLoading(false);
     }

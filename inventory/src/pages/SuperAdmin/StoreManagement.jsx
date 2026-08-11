@@ -179,7 +179,10 @@ const StoreManagement = () => {
     setSubmitting(true);
     try {
       if (selectedStore) {
-        const { password, ...updatePayload } = form;
+        const updatePayload = { ...form };
+        if (!updatePayload.password || !updatePayload.password.trim()) {
+          delete updatePayload.password;
+        }
         const res = await superAdminAPI.updateStore(selectedStore.id, updatePayload);
         if (res.success) {
           handleCloseModal();

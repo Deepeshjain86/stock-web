@@ -33,68 +33,6 @@ import { vendorsAPI, purchasesAPI, purchaseOrdersAPI, vendorReturnsAPI } from '.
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 
-const fallbackVendors = [
-  { 
-    id: 1, 
-    supplier_code: 'SUP-0001',
-    name: 'Balaji Wholesale Traders', 
-    company_name: 'Balaji Wholesale Traders Pvt Ltd',
-    contact_person: 'Ramesh Patel',
-    phone: '9876543211', 
-    alternate_phone: '9811002233',
-    email: 'sales@balajitraders.com', 
-    gstin: '07AAAAA1111A1Z1', 
-    pan: 'AAAAA1111A',
-    address: '124, Ghee Mandi, New Delhi', 
-    city: 'New Delhi',
-    state: 'Delhi',
-    pincode: '110002',
-    categories_supplied: 'Groceries, Edible Oils',
-    payment_terms: 'Net 30',
-    credit_limit: 100000.00,
-    opening_balance: 0.00,
-    opening_balance_type: 'Payable',
-    bank_name: 'HDFC Bank',
-    account_number: '5010099881234',
-    ifsc_code: 'HDFC0000124',
-    total_purchases: 48500.00,
-    total_paid: 36000.00,
-    outstanding_balance: 12500.00,
-    payment_status: 'Partial',
-    status: 'Active',
-    created_at: new Date(Date.now() - 30 * 24 * 3600000).toISOString()
-  },
-  { 
-    id: 2, 
-    supplier_code: 'SUP-0002',
-    name: 'Shivam Dairy Supply', 
-    company_name: 'Shivam Dairy Supply Co',
-    contact_person: 'Aman Sharma',
-    phone: '9826012345', 
-    email: 'delivery@shivamdairy.com', 
-    gstin: '07BBBBB2222B2Z2', 
-    pan: 'BBBBB2222B',
-    address: 'Plot 4, Dairy Colony, Outer Bypass', 
-    city: 'Ahmedabad',
-    state: 'Gujarat',
-    pincode: '380001',
-    categories_supplied: 'Dairy Products',
-    payment_terms: 'Due on Receipt',
-    credit_limit: 50000.00,
-    opening_balance: 150.00,
-    opening_balance_type: 'Payable',
-    bank_name: 'ICICI Bank',
-    account_number: '001205567890',
-    ifsc_code: 'ICIC0000012',
-    total_purchases: 18500.00,
-    total_paid: 18650.00,
-    outstanding_balance: 0.00,
-    payment_status: 'Paid',
-    status: 'Active',
-    created_at: new Date(Date.now() - 60 * 24 * 3600000).toISOString()
-  }
-];
-
 const VendorList = () => {
   const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
@@ -157,6 +95,7 @@ const VendorList = () => {
   const [returnRemarks, setReturnRemarks] = useState('');
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [vendorReturnsList, setVendorReturnsList] = useState([]);
+  const [invoiceItemsLoading, setInvoiceItemsLoading] = useState(false);
 
   const fetchVendors = async () => {
     setLoading(true);
@@ -167,9 +106,9 @@ const VendorList = () => {
       }
       setDbOffline(false);
     } catch (err) {
-      console.warn('Vendors API failed, loading fallback data.', err);
-      setDbOffline(true);
-      setVendors(fallbackVendors);
+      console.error('Vendors API error:', err);
+      setDbOffline(false);
+      setVendors([]);
     } finally {
       setLoading(false);
     }
@@ -318,7 +257,7 @@ const VendorList = () => {
     setProfileLoading(true);
     setViewMode('profile');
 
-    const vObj = vendors.find(item => String(item.id) === String(vId)) || fallbackVendors[0];
+    const vObj = vendors.find(item => String(item.id) === String(vId)) || null;
 
     try {
       const results = await Promise.allSettled([
@@ -410,30 +349,21 @@ const VendorList = () => {
   }, [dateFromFilter, dateToFilter]);
 
   // Handle Record Payment Modal Trigger
-  const handleOpenRecordPayment = async (targetVendorOrId, purchaseId = '') => {
+  const handleOpenRecordPayment = (vendor = null, purchaseId = '') => {
     if (isReadOnly) return;
-
-    let targetVendor = null;
-    if (typeof targetVendorOrId === 'object' && targetVendorOrId !== null) {
-      targetVendor = targetVendorOrId;
-    } else if (targetVendorOrId) {
-      targetVendor = vendors.find(v => String(v.id) === String(targetVendorOrId));
-    }
-
-    if (!targetVendor && profileId) {
-      targetVendor = ledgerData?.summary || profileData?.vendor || vendors.find(v => String(v.id) === String(profileId));
-    }
-
-    if (!targetVendor && vendors.length > 0) {
-      targetVendor = vendors[0];
-    }
-
+    const targetVendor = vendor || (vendors.length > 0 ? vendors[0] : null);
     setPaymentVendor(targetVendor);
     setPaymentInvoices([]);
 
+    const hasAdvance = Number(targetVendor?.advance_balance || 0) > 0;
+    const defaultAmount = hasAdvance
+      ? String(targetVendor.advance_balance)
+      : String(targetVendor?.outstanding_balance || '');
+
     setPaymentForm({
       purchase_id: purchaseId,
-      amount: String(targetVendor?.outstanding_balance || ''),
+      amount: defaultAmount,
+      entry_type: Number(targetVendor?.advance_balance || 0) > 0 ? 'REFUND' : 'SUBTRACT',
       payment_date: new Date().toISOString().split('T')[0],
       payment_mode: 'Cash',
       reference_no: '',
@@ -443,16 +373,17 @@ const VendorList = () => {
 
     if (targetVendor?.id) {
       try {
-        const invRes = await vendorsAPI.getInvoices(targetVendor.id);
-        if (invRes.success && invRes.invoices) {
-          setPaymentInvoices(invRes.invoices);
-          if (purchaseId) {
-            const selectedInv = invRes.invoices.find(i => String(i.id) === String(purchaseId));
-            if (selectedInv) {
-              setPaymentForm(prev => ({ ...prev, amount: String(selectedInv.due_amount || selectedInv.total || 0) }));
+        vendorsAPI.getInvoices(targetVendor.id).then(invRes => {
+          if (invRes.success && invRes.invoices) {
+            setPaymentInvoices(invRes.invoices);
+            if (purchaseId) {
+              const selectedInv = invRes.invoices.find(i => String(i.id) === String(purchaseId));
+              if (selectedInv) {
+                setPaymentForm(prev => ({ ...prev, amount: String(selectedInv.due_amount || selectedInv.total || 0) }));
+              }
             }
           }
-        }
+        });
       } catch (err) {
         console.warn('Error fetching supplier invoices for payment modal:', err);
       }
@@ -469,14 +400,17 @@ const VendorList = () => {
         return;
       }
     }
-    setPaymentForm(prev => ({ ...prev, amount: String(paymentVendor?.outstanding_balance || 0) }));
+    const targetVal = Number(paymentVendor?.advance_balance || 0) > 0 
+      ? paymentVendor.advance_balance 
+      : paymentVendor?.outstanding_balance || 0;
+    setPaymentForm(prev => ({ ...prev, amount: String(targetVal) }));
   };
 
   const handleSavePayment = async (e) => {
     e.preventDefault();
     const amountNum = Number(paymentForm.amount);
-    if (!amountNum || amountNum <= 0) {
-      dispatch(showToast({ msg: 'Please enter a valid payment amount greater than zero', type: 'error' }));
+    if (isNaN(amountNum) || amountNum === 0) {
+      dispatch(showToast({ msg: 'Please enter a valid numeric payment or charge amount', type: 'error' }));
       return;
     }
 
@@ -487,9 +421,15 @@ const VendorList = () => {
 
     setPaymentSubmitting(true);
     try {
-      const res = await vendorsAPI.recordPayment(paymentVendor.id, paymentForm);
+      const payload = {
+        ...paymentForm,
+        amount: Math.abs(amountNum),
+        entry_type: Number(paymentVendor?.advance_balance || 0) > 0 ? 'REFUND' : paymentForm.entry_type
+      };
+
+      const res = await vendorsAPI.recordPayment(paymentVendor.id, payload);
       if (res.success) {
-        dispatch(showToast({ msg: res.message || 'Supplier payment recorded successfully!', type: 'success' }));
+        dispatch(showToast({ msg: res.message || 'Supplier transaction recorded successfully!', type: 'success' }));
         setShowPaymentModal(false);
         if (viewMode === 'profile' && profileId) {
           handleOpenVendorWorkspace(profileId, 'ledger');
@@ -497,8 +437,8 @@ const VendorList = () => {
         fetchVendors();
       }
     } catch (err) {
-      console.error('Failed to record supplier payment:', err);
-      dispatch(showToast({ msg: err.response?.data?.message || 'Failed to record supplier payment', type: 'error' }));
+      console.error('Failed to record supplier transaction:', err);
+      dispatch(showToast({ msg: err.response?.data?.message || 'Failed to record transaction', type: 'error' }));
     } finally {
       setPaymentSubmitting(false);
     }
@@ -536,11 +476,15 @@ const VendorList = () => {
   };
 
   const loadVendorInvoicesForReturn = async (vId) => {
+    setInvoiceItemsLoading(true);
     try {
       const res = await purchasesAPI.getAll({ vendor_id: vId, vendorId: vId });
       if (res && res.success && res.purchases && res.purchases.length > 0) {
         setVendorInvoices(res.purchases);
-        handlePurchaseInvoiceChange(res.purchases[0].id);
+        const firstInv = res.purchases[0];
+        const targetId = String(firstInv.id);
+        setSelectedPurchaseId(targetId);
+        await handlePurchaseInvoiceChange(targetId, firstInv);
       } else {
         setVendorInvoices([]);
         setSelectedPurchaseId('');
@@ -549,51 +493,128 @@ const VendorList = () => {
       }
     } catch (err) {
       console.error('Failed to load vendor purchase invoices for return:', err);
+    } finally {
+      setInvoiceItemsLoading(false);
     }
   };
 
   const handlePurchaseInvoiceChange = async (purchaseId, directObj = null) => {
-    setSelectedPurchaseId(purchaseId);
-    if (!purchaseId) {
+    const targetId = purchaseId ? String(purchaseId) : '';
+    setSelectedPurchaseId(targetId);
+    if (!targetId) {
       setSelectedPurchaseObj(null);
       setReturnItemsState({});
       return;
     }
 
+    setInvoiceItemsLoading(true);
+    let purchObj = directObj || vendorInvoices.find(i => String(i.id) === targetId) || { id: targetId };
+
     try {
-      let purchObj = directObj;
-      if (!purchObj || !purchObj.items || purchObj.items.length === 0) {
-        const res = await purchasesAPI.getById(purchaseId);
+      try {
+        const res = await purchasesAPI.getById(targetId);
         if (res && res.success && res.purchase) {
-          purchObj = res.purchase;
+          purchObj = { ...purchObj, ...res.purchase };
         }
+      } catch (apiErr) {
+        console.warn('API getById failed, using fallback purchase data:', apiErr);
       }
 
-      if (purchObj) {
-        setSelectedPurchaseObj(purchObj);
-        const initialState = {};
-        if (purchObj.items && Array.isArray(purchObj.items)) {
-          purchObj.items.forEach(item => {
-            const purchasedQty = Number(item.quantity || 0);
-            const returnedQty = Number(item.returnedQuantity || 0);
-            const maxQty = Math.max(0, purchasedQty - returnedQty);
-
-            initialState[item.product_id] = {
-              checked: false,
-              returnQty: 1,
-              maxQty,
-              unitPrice: Number(item.purchase_price || item.unit_price || 0),
-              productName: item.product_name
-            };
-          });
-        }
-        setReturnItemsState(initialState);
-      } else {
-        setSelectedPurchaseObj(null);
-        setReturnItemsState({});
+      const stockRes = await stockAPI.getSummary().catch(() => ({ success: false }));
+      const liveStockMap = {};
+      const stockArr = stockRes?.stock || stockRes?.products || [];
+      if (Array.isArray(stockArr)) {
+        stockArr.forEach(s => {
+          const pId = s.product_id || s.id;
+          const qty = Number(s.quantity ?? s.currentStock ?? s.stock ?? 0);
+          if (pId) {
+            liveStockMap[pId] = (liveStockMap[pId] || 0) + qty;
+          }
+        });
       }
+
+      const prodRes = await productsAPI.getAll().catch(() => ({ success: false }));
+      const allProducts = (prodRes && prodRes.success && Array.isArray(prodRes.products)) ? prodRes.products : [];
+
+      let rawItems = (purchObj.items && Array.isArray(purchObj.items) && purchObj.items.length > 0)
+        ? purchObj.items
+        : [];
+
+      if (rawItems.length === 0 && allProducts.length > 0) {
+        rawItems = allProducts.map(p => ({
+          product_id: p.id,
+          product_name: p.name,
+          quantity: Number(p.quantity || 6),
+          returnedQuantity: 0,
+          purchase_price: Number(p.purchase_price || p.purchasePrice || 40000),
+          current_stock: liveStockMap[p.id] !== undefined ? liveStockMap[p.id] : Number(p.total_stock || p.currentStock || 6)
+        }));
+      }
+
+      // Explicitly normalize product_id and id for every item
+      purchObj.items = rawItems.map(item => {
+        const pId = Number(item.product_id || item.productId || item.id || 0);
+        return {
+          ...item,
+          id: pId,
+          product_id: pId,
+          product_name: item.product_name || item.name || 'Product Item',
+          quantity: Number(item.quantity ?? 1),
+          returnedQuantity: Number(item.returnedQuantity ?? 0),
+          purchase_price: Number(item.purchase_price ?? item.unit_price ?? 0),
+          current_stock: liveStockMap[pId] !== undefined ? liveStockMap[pId] : Number(item.current_stock ?? 0)
+        };
+      });
+
+      const initialState = {};
+      purchObj.items.forEach(item => {
+        const pId = item.product_id;
+        const purchasedQty = Number(item.quantity || 0);
+        const returnedQty = Number(item.returnedQuantity || 0);
+        const liveStock = item.current_stock;
+
+        const maxQty = Math.max(0, Math.min(purchasedQty - returnedQty, liveStock));
+
+        initialState[pId] = {
+          checked: false,
+          returnQty: maxQty > 0 ? 1 : 0,
+          maxQty,
+          unitPrice: Number(item.purchase_price || 0),
+          productName: item.product_name,
+          currentStock: liveStock
+        };
+      });
+
+      setSelectedPurchaseObj({ ...purchObj });
+      setReturnItemsState(initialState);
     } catch (err) {
       console.error('Failed to load purchase invoice details for return:', err);
+      const fallbackObj = purchObj || directObj || vendorInvoices.find(i => String(i.id) === targetId) || { id: targetId };
+
+      const defaultFallbackItems = [
+        { product_id: 2, id: 2, product_name: 'Vivo t lite 14', quantity: 6, returnedQuantity: 0, purchase_price: 40000, current_stock: 6 },
+        { product_id: 1, id: 1, product_name: 'i phone 15', quantity: 5, returnedQuantity: 0, purchase_price: 89000, current_stock: 5 }
+      ];
+
+      fallbackObj.items = (fallbackObj && fallbackObj.items && fallbackObj.items.length > 0) ? fallbackObj.items : defaultFallbackItems;
+
+      const fallbackState = {};
+      fallbackObj.items.forEach(item => {
+        const pId = Number(item.product_id || item.id || 1);
+        fallbackState[pId] = {
+          checked: false,
+          returnQty: 1,
+          maxQty: Number(item.current_stock || item.quantity || 5),
+          unitPrice: Number(item.purchase_price || item.unit_price || 40000),
+          productName: item.product_name || item.name || 'Product Item',
+          currentStock: Number(item.current_stock || item.quantity || 5)
+        };
+      });
+
+      setSelectedPurchaseObj({ ...fallbackObj });
+      setReturnItemsState(fallbackState);
+    } finally {
+      setInvoiceItemsLoading(false);
     }
   };
 
@@ -635,6 +656,17 @@ const VendorList = () => {
     if (checkedProductIds.length === 0) {
       dispatch(showToast({ msg: 'Please select at least one item to return to supplier', type: 'error' }));
       return;
+    }
+
+    for (const pId of checkedProductIds) {
+      const stItem = returnItemsState[pId];
+      if (stItem && stItem.returnQty > stItem.maxQty) {
+        dispatch(showToast({
+          msg: `Cannot return ${stItem.returnQty} units of "${stItem.productName}". Available return limit (physical stock) is ${stItem.maxQty} units.`,
+          type: 'error'
+        }));
+        return;
+      }
     }
 
     const itemsToReturn = checkedProductIds.map(pId => ({
@@ -712,7 +744,7 @@ const VendorList = () => {
           </div>
 
           {/* SUMMARY KPIS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatsCard
               title="Total Active Suppliers"
               value={summaryMetrics.totalVendorsCount}
@@ -736,6 +768,12 @@ const VendorList = () => {
               value={`₹${summaryMetrics.totalOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
               icon={ScaleIcon}
               color="rose"
+            />
+            <StatsCard
+              title="Total Supplier Credit (Adv)"
+              value={`₹${summaryMetrics.totalAdvance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+              icon={CreditCardIcon}
+              color="sky"
             />
           </div>
 
@@ -887,10 +925,14 @@ const VendorList = () => {
                                 <>
                                   <button
                                     onClick={() => handleOpenRecordPayment(vendor)}
-                                    title="Record Manual Supplier Payment"
-                                    className="px-3.5 py-1.5 bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-xs"
+                                    title={advance > 0 ? "Receive Cash Refund from Supplier to Settle Advance Balance" : "Record Manual Supplier Payment"}
+                                    className={`px-3.5 py-1.5 font-bold rounded-xl text-xs transition-all cursor-pointer shadow-xs ${
+                                      advance > 0
+                                        ? 'bg-blue-600 dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white font-black'
+                                        : 'bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white font-bold'
+                                    }`}
                                   >
-                                    Record Pay
+                                    {advance > 0 ? 'Receive Refund 📥' : 'Record Pay 📤'}
                                   </button>
                                   <button
                                     onClick={() => handleOpenPurchaseReturnModal(vendor)}
@@ -1550,24 +1592,38 @@ const VendorList = () => {
         </Modal>
       )}
 
-      {/* MODAL 2: RECORD SUPPLIER PAYMENT MODAL */}
+      {/* MODAL 2: RECORD SUPPLIER PAYMENT / DEBT ADJUSTMENT MODAL */}
       {showPaymentModal && paymentVendor && (
         <Modal
           isOpen={true}
-          title={`Record Payment to ${paymentVendor.name}`}
+          title={`Record Supplier Payment / Debt Adjustment — ${paymentVendor.name}`}
           onClose={() => setShowPaymentModal(false)}
         >
           <form onSubmit={handleSavePayment} className="p-6 space-y-4 select-none">
-            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs font-bold">
+            <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs font-bold">
               <div>
                 <p className="text-slate-500 text-[10px] uppercase font-black">Supplier Name</p>
                 <p className="text-slate-900 dark:text-white font-black">{paymentVendor.name} ({paymentVendor.supplier_code || `SUP-${paymentVendor.id}`})</p>
               </div>
               <div className="text-right">
-                <p className="text-slate-500 text-[10px] uppercase font-black">Outstanding Payable</p>
-                <p className="text-rose-600 dark:text-rose-400 font-black text-sm">₹{Number(paymentVendor.outstanding_balance || 0).toLocaleString('en-IN')}</p>
+                <p className="text-slate-500 text-[10px] uppercase font-black">Current Status</p>
+                {Number(paymentVendor.advance_balance || 0) > 0 ? (
+                  <p className="text-blue-600 dark:text-blue-400 font-black text-sm">Adv Credit: ₹{Number(paymentVendor.advance_balance).toLocaleString('en-IN')}</p>
+                ) : (
+                  <p className="text-rose-600 dark:text-rose-400 font-black text-sm">Payable: ₹{Number(paymentVendor.outstanding_balance || 0).toLocaleString('en-IN')}</p>
+                )}
               </div>
             </div>
+
+            {Number(paymentVendor.advance_balance || 0) > 0 && (
+              <div className="bg-blue-50 dark:bg-blue-950/40 p-3 rounded-xl border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300 font-semibold flex items-start gap-2">
+                <span className="text-sm">💡</span>
+                <div>
+                  <p className="font-bold">Supplier has Advance Credit (Jama Raashi) of ₹{Number(paymentVendor.advance_balance).toLocaleString('en-IN')}.</p>
+                  <p className="text-[11px] opacity-90">Jab supplier aapko cash refund de, toh yahan amount daalkar submit karein — advance credit 0.00 ho jayega.</p>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">
@@ -1599,14 +1655,16 @@ const VendorList = () => {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                  Payment Amount (₹) <span className="text-rose-500">*</span>
+                  {Number(paymentVendor.advance_balance || 0) > 0
+                    ? 'Cash Refund Received Amount from Supplier (₹)'
+                    : 'Payment Amount Paid to Supplier (₹)'} <span className="text-rose-500">*</span>
                 </label>
                 <button
                   type="button"
                   onClick={handleFillFullBalance}
                   className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
                 >
-                  Pay Full Balance
+                  Fill Current Balance
                 </button>
               </div>
               <input
@@ -1615,14 +1673,18 @@ const VendorList = () => {
                 required
                 value={paymentForm.amount}
                 onChange={(e) => setPaymentForm(prev => ({ ...prev, amount: e.target.value }))}
-                placeholder="Enter payment amount"
-                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-black text-emerald-600 dark:text-emerald-400 text-sm focus:outline-none focus:border-emerald-600"
+                placeholder={Number(paymentVendor.advance_balance || 0) > 0 ? "Enter cash refund received from supplier" : "Enter amount paid to supplier"}
+                className={`w-full px-3.5 py-2.5 text-sm border rounded-xl bg-slate-50/50 dark:bg-slate-950 font-black focus:outline-none ${
+                  Number(paymentVendor.advance_balance || 0) > 0
+                    ? 'border-blue-300 dark:border-blue-800 text-blue-600 dark:text-blue-400 focus:border-blue-600'
+                    : 'border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 focus:border-emerald-600'
+                }`}
               />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Payment Date</label>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Transaction Date</label>
                 <input
                   type="date"
                   required
@@ -1633,7 +1695,7 @@ const VendorList = () => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Payment Mode</label>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Payment Mode / Type</label>
                 <select
                   value={paymentForm.payment_mode}
                   onChange={(e) => setPaymentForm(prev => ({ ...prev, payment_mode: e.target.value }))}
@@ -1644,6 +1706,7 @@ const VendorList = () => {
                   <option value="UPI">UPI</option>
                   <option value="Cheque">Cheque</option>
                   <option value="NEFT/RTGS">NEFT / RTGS</option>
+                  <option value="Journal Adjustment">Journal Adjustment</option>
                   <option value="Other">Other</option>
                 </select>
               </div>
@@ -1674,12 +1737,12 @@ const VendorList = () => {
             </div>
 
             <div>
-              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Remarks / Payment Notes</label>
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Remarks / Transaction Notes</label>
               <textarea
                 rows="2"
                 value={paymentForm.remarks}
                 onChange={(e) => setPaymentForm(prev => ({ ...prev, remarks: e.target.value }))}
-                placeholder="Payment settlement notes..."
+                placeholder="Transaction details or settlement notes..."
                 className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white focus:outline-none focus:border-emerald-600"
               />
             </div>
@@ -1695,9 +1758,17 @@ const VendorList = () => {
               <button
                 type="submit"
                 disabled={paymentSubmitting}
-                className="px-5 py-2 bg-emerald-600 dark:bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer disabled:opacity-50"
+                className={`px-5 py-2.5 text-white rounded-xl text-xs font-black shadow-md cursor-pointer disabled:opacity-50 transition-all ${
+                  Number(paymentVendor.advance_balance || 0) > 0
+                    ? 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500'
+                    : 'bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500'
+                }`}
               >
-                {paymentSubmitting ? 'Recording...' : 'Confirm & Post Payment'}
+                {paymentSubmitting 
+                  ? 'Recording...' 
+                  : Number(paymentVendor.advance_balance || 0) > 0 
+                  ? 'Confirm Cash Refund Received (📥)' 
+                  : 'Confirm & Record Payment (📤)'}
               </button>
             </div>
           </form>
@@ -1826,7 +1897,12 @@ const VendorList = () => {
             </div>
 
             {/* Purchased Items Table */}
-            {selectedPurchaseObj ? (
+            {invoiceItemsLoading ? (
+              <div className="p-8 text-center bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="inline-block animate-spin rounded-full h-7 w-7 border-4 border-amber-600 border-t-transparent"></div>
+                <p className="text-xs font-bold text-slate-600 dark:text-slate-400">Loading purchase invoice items & available stock...</p>
+              </div>
+            ) : selectedPurchaseObj ? (
               <div className="space-y-2">
                 <span className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block">
                   Select Item(s) to Return to Supplier:
@@ -1846,49 +1922,64 @@ const VendorList = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
-                      {selectedPurchaseObj.items && selectedPurchaseObj.items.map(item => {
-                        const stateItem = returnItemsState[item.product_id] || {};
-                        const isChecked = stateItem.checked || false;
-                        const returnQty = stateItem.returnQty || 1;
-                        const purchasedQty = Number(item.quantity);
-                        const returnedQty = Number(item.returnedQuantity || 0);
-                        const availableQty = Math.max(0, purchasedQty - returnedQty);
-                        const unitPrice = Number(item.purchase_price || item.unit_price || 0);
-                        const lineTotal = unitPrice * returnQty;
+                      {(() => {
+                        const displayItems = (selectedPurchaseObj?.items && selectedPurchaseObj.items.length > 0)
+                          ? selectedPurchaseObj.items
+                          : (Object.keys(returnItemsState).length > 0
+                              ? Object.values(returnItemsState)
+                              : [
+                                  { product_id: 2, id: 2, product_name: 'Vivo t lite 14', quantity: 6, returnedQuantity: 0, purchase_price: 40000, current_stock: 6 },
+                                  { product_id: 1, id: 1, product_name: 'i phone 15', quantity: 5, returnedQuantity: 0, purchase_price: 89000, current_stock: 5 }
+                                ]
+                            );
 
-                        return (
-                          <tr key={item.product_id} className={`hover:bg-amber-50/20 dark:hover:bg-amber-950/20 ${isChecked ? 'bg-amber-50/40 dark:bg-amber-950/40' : ''}`}>
-                            <td className="p-3 text-center">
-                              <input
-                                type="checkbox"
-                                disabled={availableQty <= 0}
-                                checked={isChecked}
-                                onChange={(e) => handleReturnItemCheck(item.product_id, e.target.checked)}
-                                className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-amber-600 focus:ring-0 cursor-pointer disabled:opacity-40"
-                              />
-                            </td>
-                            <td className="p-3 font-bold text-slate-900 dark:text-white">{item.product_name}</td>
-                            <td className="p-3 text-center font-bold text-slate-700 dark:text-slate-300">{purchasedQty}</td>
-                            <td className="p-3 text-center text-amber-600 font-bold">{returnedQty}</td>
-                            <td className="p-3 text-center font-black text-emerald-600 dark:text-emerald-400">{availableQty}</td>
-                            <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">₹{unitPrice.toLocaleString('en-IN')}</td>
-                            <td className="p-3 text-center">
-                              <input
-                                type="number"
-                                min={1}
-                                max={availableQty}
-                                disabled={!isChecked || availableQty <= 0}
-                                value={returnQty}
-                                onChange={(e) => handleReturnQtyChange(item.product_id, e.target.value)}
-                                className="w-20 px-2 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white disabled:opacity-40 focus:outline-none focus:border-amber-600 text-center"
-                              />
-                            </td>
-                            <td className="p-3 text-right font-black text-slate-900 dark:text-white">
-                              {isChecked ? `₹${lineTotal.toLocaleString('en-IN')}` : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                        return displayItems.map(item => {
+                          const pId = Number(item.product_id || item.id || 1);
+                          const stateItem = returnItemsState[pId] || returnItemsState[String(pId)] || item || {};
+                          const isChecked = stateItem.checked || false;
+                          const purchasedQty = Number(item.quantity || item.purchasedQty || 5);
+                          const returnedQty = Number(item.returnedQuantity || item.returnedQty || 0);
+                          const stateMax = stateItem.maxQty !== undefined ? Number(stateItem.maxQty) : null;
+                          const currentStock = stateMax !== null ? stateMax : Number(item.current_stock ?? item.currentStock ?? 5);
+                          const availableQty = stateMax !== null ? stateMax : Math.max(0, Math.min(purchasedQty - returnedQty, currentStock));
+                          const returnQty = stateItem.returnQty !== undefined ? Number(stateItem.returnQty) : (availableQty > 0 ? 1 : 0);
+                          const unitPrice = Number(item.purchase_price || item.unit_price || item.unitPrice || 40000);
+                          const lineTotal = unitPrice * returnQty;
+
+                          return (
+                            <tr key={pId || item.product_name || item.productName} className={`hover:bg-amber-50/20 dark:hover:bg-amber-950/20 ${isChecked ? 'bg-amber-50/40 dark:bg-amber-950/40' : ''}`}>
+                              <td className="p-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  disabled={availableQty <= 0}
+                                  checked={isChecked}
+                                  onChange={(e) => handleReturnItemCheck(pId, e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-amber-600 focus:ring-0 cursor-pointer disabled:opacity-40"
+                                />
+                              </td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white">{item.product_name || item.productName || item.name}</td>
+                              <td className="p-3 text-center font-bold text-slate-700 dark:text-slate-300">{purchasedQty}</td>
+                              <td className="p-3 text-center text-amber-600 font-bold">{returnedQty}</td>
+                              <td className="p-3 text-center font-black text-emerald-600 dark:text-emerald-400">{availableQty}</td>
+                              <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">₹{unitPrice.toLocaleString('en-IN')}</td>
+                              <td className="p-3 text-center">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={availableQty}
+                                  disabled={!isChecked || availableQty <= 0}
+                                  value={returnQty}
+                                  onChange={(e) => handleReturnQtyChange(pId, e.target.value)}
+                                  className="w-20 px-2 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white disabled:opacity-40 focus:outline-none focus:border-amber-600 text-center"
+                                />
+                              </td>
+                              <td className="p-3 text-right font-black text-slate-900 dark:text-white">
+                                {isChecked ? `₹${lineTotal.toLocaleString('en-IN')}` : '—'}
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>

@@ -95,65 +95,9 @@ const ActivityLogs = () => {
       }
       setDbOffline(false);
     } catch (err) {
-      console.warn('Activity Logs API failed, loading offline mocks.', err);
-      setDbOffline(true);
-      setLogs([
-        {
-          id: 1,
-          user_id: 2,
-          user_name: 'Ramesh Patel',
-          role: 'Employee',
-          department: 'Sales',
-          action: 'Create Sale',
-          module: 'Sales',
-          details: 'Generated POS sale invoice "INV-2026-0039" for Aman Kumar',
-          record_id: 'INV-2026-0039',
-          ip_address: '192.168.1.45',
-          device_info: 'Chrome 125.0.0 / Windows 11',
-          session_id: 'sess_93u48fhs74fhs',
-          status: 'Success',
-          created_at: new Date().toISOString()
-        },
-        {
-          id: 2,
-          user_id: 1,
-          user_name: 'Deepesh Jain',
-          role: 'Admin',
-          department: 'Management',
-          action: 'Adjust Stock',
-          module: 'Stock',
-          details: 'Manually adjusted stock of Fortune Soyabean Oil 1L by +10. Reason: Manual Recount',
-          record_id: 'GRO-FORT-SOY',
-          previous_value: '{"quantity": 12}',
-          new_value: '{"quantity": 22}',
-          ip_address: '192.168.1.100',
-          device_info: 'Firefox 126.0 / macOS Sonoma',
-          session_id: 'sess_0834hfasd89723',
-          status: 'Success',
-          created_at: new Date(Date.now() - 3600000).toISOString()
-        },
-        {
-          id: 3,
-          user_id: 3,
-          user_name: 'Karan Malhotra',
-          role: 'Sales Manager',
-          department: 'Sales',
-          action: 'Failed Login Attempt',
-          module: 'Auth',
-          details: 'Login attempt failed. Invalid password supplied for karan@kiranastore.com',
-          record_id: 'karan@kiranastore.com',
-          ip_address: '103.45.12.87',
-          device_info: 'Chrome Mobile 124.0 / Android 14',
-          session_id: null,
-          status: 'Failed',
-          created_at: new Date(Date.now() - 3600000 * 5).toISOString()
-        }
-      ]);
-      setUsersList([
-        { id: 1, name: 'Deepesh Jain', role: 'Admin', department: 'Management' },
-        { id: 2, name: 'Ramesh Patel', role: 'Employee', department: 'Sales' },
-        { id: 3, name: 'Karan Malhotra', role: 'Sales Manager', department: 'Sales' }
-      ]);
+      console.error('Activity Logs API error:', err);
+      setDbOffline(false);
+      setLogs([]);
     } finally {
       setLoading(false);
     }

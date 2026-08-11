@@ -11,28 +11,6 @@ import { purchasesAPI } from '../../services/api';
 import { useAppSelector } from '../../store/hooks';
 import PurchaseInvoicePrintTemplate from '../../components/common/PurchaseInvoicePrintTemplate';
 
-// Fallback data in case server is offline
-const fallbackPurchases = [
-  {
-    id: 1,
-    purchaseNo: 'PUR-001-2026',
-    date: '2026-06-15',
-    vendor: 'Balaji Wholesale Traders',
-    total: 8181.20,
-    paymentStatus: 'Paid',
-    deliveryStatus: 'Received'
-  },
-  {
-    id: 2,
-    purchaseNo: 'PUR-002-2026',
-    date: '2026-07-01',
-    vendor: 'Metro Cash & Carry',
-    total: 13070.00,
-    paymentStatus: 'Pending',
-    deliveryStatus: 'Pending'
-  }
-];
-
 const PurchaseList = () => {
   const { user } = useAppSelector((state) => state.auth);
   const isReadOnly = user?.role === 'Super Admin';
@@ -95,9 +73,9 @@ const PurchaseList = () => {
       }
       setDbOffline(false);
     } catch (err) {
-      console.warn('Purchases API failed, loading fallback data.', err);
-      setDbOffline(true);
-      setPurchases(fallbackPurchases);
+      console.error('Purchases API error:', err);
+      setDbOffline(false);
+      setPurchases([]);
     } finally {
       setLoading(false);
     }
@@ -138,50 +116,32 @@ const PurchaseList = () => {
 
   const handleSubmit = async (formData) => {
     try {
-      if (!dbOffline) {
-        // In the form: items is array of product details
-        // backend expects items to be array of { product_id, quantity, purchase_price, gst, total }
-        const itemsMapped = formData.items.map(item => ({
-          product_id: item.productId || 1,
-          quantity: Number(item.quantity) || 1,
-          purchase_price: Number(item.price) || 0,
-          gst: Number(item.gstPercent) || 0,
-          total: Number(item.total) || 0
-        }));
+      const itemsMapped = formData.items.map(item => ({
+        product_id: item.productId || 1,
+        quantity: Number(item.quantity) || 1,
+        purchase_price: Number(item.price) || 0,
+        gst: Number(item.gstPercent) || 0,
+        total: Number(item.total) || 0
+      }));
 
-        const payload = {
-          vendor_id: formData.vendorId || 1,
-          warehouse_id: formData.warehouseId || 1,
-          date: formData.purchaseDate || new Date().toISOString().split('T')[0],
-          subtotal: Number(formData.subtotal) || 0,
-          discount: Number(formData.discountAmount) || 0,
-          gst_amount: Number(formData.tax) || 0,
-          total: Number(formData.total) || 0,
-          payment_status: formData.paymentStatus || 'Pending',
-          delivery_status: formData.deliveryStatus || 'Received',
-          payment_method: formData.paymentMode || 'Cash',
-          items: itemsMapped
-        };
+      const payload = {
+        vendor_id: formData.vendorId || 1,
+        warehouse_id: formData.warehouseId || 1,
+        date: formData.purchaseDate || new Date().toISOString().split('T')[0],
+        subtotal: Number(formData.subtotal) || 0,
+        discount: Number(formData.discountAmount) || 0,
+        gst_amount: Number(formData.tax) || 0,
+        total: Number(formData.total) || 0,
+        payment_status: formData.paymentStatus || 'Pending',
+        delivery_status: formData.deliveryStatus || 'Received',
+        payment_method: formData.paymentMode || 'Cash',
+        items: itemsMapped
+      };
 
-        await purchasesAPI.create(payload);
-        toast.success('Purchase invoice recorded successfully!');
-        setShowModal(false);
-        fetchPurchases();
-      } else {
-        // Local simulation fallback
-        const newPurchase = {
-          ...formData,
-          id: Math.max(...purchases.map((p) => p.id), 0) + 1,
-          purchaseNo: `PUR-${String(purchases.length + 1).padStart(3, '0')}-2026`,
-          vendor: formData.vendorName || 'Unknown Vendor',
-          total: Number(formData.total) || 0,
-          paymentStatus: formData.paymentStatus || 'Pending',
-          deliveryStatus: formData.deliveryStatus || 'Received',
-          date: formData.date || new Date().toISOString().split('T')[0],
-        };
-        setPurchases([newPurchase, ...purchases]);
-        toast.success('Purchase invoice recorded locally');
-      }
+      await purchasesAPI.create(payload);
+      toast.success('Purchase invoice recorded successfully!');
+      setShowModal(false);
+      fetchPurchases();
     } catch (err) {
       console.error('Error saving purchase order:', err);
       toast.error(err.response?.data?.message || 'Error processing purchase order');

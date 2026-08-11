@@ -31,15 +31,11 @@ const StockIn = ({ onStockChanged }) => {
       if (logsRes.success) {
         setRecords(logsRes.logs);
       }
-      setDbOffline(false);
     } catch (err) {
-      console.warn('API connection failed, loading fallback data.', err);
-      setDbOffline(true);
-      setProductList([
-        { id: 1, name: 'Fortune Soyabean Oil 1L', sku: 'GRO-FORT-SOY' },
-        { id: 2, name: 'Tata Salt 1kg', sku: 'GRO-TATA-SLT' },
-        { id: 3, name: 'Maggi 2-Min Noodles 12-Pack', sku: 'SNA-MAGG-12P' }
-      ]);
+      console.error('StockIn API error:', err);
+      setDbOffline(false);
+      setProductList([]);
+      setRecords([]);
     } finally {
       setLoading(false);
     }

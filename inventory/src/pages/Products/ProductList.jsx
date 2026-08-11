@@ -145,14 +145,9 @@ const ProductList = () => {
       }
       setDbOffline(false);
     } catch (error) {
-      console.warn('Backend server offline. Setting fallback catalog.', error);
-      setDbOffline(true);
-      // Fallback dummy products
-      setProducts([
-        { id: 1, image: '🥣', name: 'Fortune Soyabean Oil 1L', barcode: '8906007281224', sku: 'OIL-FOR-001', category: 'Edible Oils', brand: 'Fortune', purchasePrice: 135, sellingPrice: 155, mrp: 170, gst: 5, currentStock: 8, minimumStock: 20, unit: 'Bottle', isLow: true, isOut: false, isNear: false, isExp: false, status: 'Low Stock', lastUpdated: '2026-07-02 11:30' },
-        { id: 2, image: '🧂', name: 'Tata Salt Compressed 1kg', barcode: '8901058002316', sku: 'SLT-TAT-002', category: 'Spices & Staples', brand: 'Tata', purchasePrice: 22, sellingPrice: 28, mrp: 30, gst: 0, currentStock: 145, minimumStock: 30, unit: 'Packet', isLow: false, isOut: false, isNear: false, isExp: false, status: 'In Stock', lastUpdated: '2026-07-03 09:15' },
-        { id: 3, image: '🍜', name: 'Maggi 2-Min Noodles 70g', barcode: '8901058895628', sku: 'NOD-MAG-012', category: 'Packaged Foods', brand: 'Nestle', purchasePrice: 11.5, sellingPrice: 14, mrp: 14, gst: 18, currentStock: 0, minimumStock: 50, unit: 'Packet', isLow: false, isOut: true, isNear: false, isExp: false, status: 'Out Of Stock', lastUpdated: '2026-07-01 18:00' }
-      ]);
+      console.error('Backend products API error:', error);
+      setDbOffline(false);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
