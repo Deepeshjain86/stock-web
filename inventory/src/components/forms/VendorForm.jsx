@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { validateEmailField } from '../../utils/validators';
 
 const VendorForm = ({ vendor, onSubmit, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -118,6 +119,13 @@ const VendorForm = ({ vendor, onSubmit, onCancel }) => {
 
     if (formData.alternate_phone?.trim() && formData.alternate_phone.replace(/\D/g, '').length !== 10) {
       newErrors.alternate_phone = 'Alternate mobile number must be exactly 10 digits';
+    }
+
+    if (formData.email?.trim()) {
+      const emailErr = validateEmailField(formData.email, false);
+      if (emailErr) {
+        newErrors.email = emailErr;
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {

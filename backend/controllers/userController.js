@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { masterPool } from '../config/tenantDb.js';
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
+import { validateEmailField } from '../utils/validators.js';
 
 // @desc    Get all users for tenant
 // @route   GET /api/users
@@ -56,8 +57,9 @@ export const createUser = async (req, res, next) => {
     if (!name) {
       return res.status(400).json({ success: false, message: 'Full Name is required', field: 'name' });
     }
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Email Address is required', field: 'email' });
+    const emailErr = validateEmailField(email, true);
+    if (emailErr) {
+      return res.status(400).json({ success: false, message: emailErr, field: 'email' });
     }
     if (!password) {
       return res.status(400).json({ success: false, message: 'Password is required', field: 'password' });
@@ -270,6 +272,10 @@ export const updateUser = async (req, res, next) => {
 
     // Check duplicate email globally if email is changing
     if (email && email !== currentEmail) {
+      const emailErr = validateEmailField(email, true);
+      if (emailErr) {
+        return res.status(400).json({ success: false, message: emailErr, field: 'email' });
+      }
       const [emailCheck] = await masterPool.query('SELECT id FROM users WHERE email = ?', [email]);
       if (emailCheck.length > 0) {
         return res.status(400).json({ success: false, message: 'Email address already exists. Please use a different email address.', field: 'email' });

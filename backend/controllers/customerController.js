@@ -1,5 +1,6 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
+import { validateEmailField } from '../utils/validators.js';
 
 
 // @desc    Get all customers with filters (search, type, status)
@@ -76,11 +77,18 @@ export const getCustomerById = async (req, res, next) => {
 export const createCustomer = async (req, res, next) => {
   try {
     const {
-      name, phone, address, customer_type, status, payment_mode, notes
+      name, phone, email, address, customer_type, status, payment_mode, notes
     } = req.body;
 
     if (!name || name.trim() === '') {
       return res.status(400).json({ success: false, message: 'Customer Full Name is required' });
+    }
+
+    if (email && String(email).trim() !== '') {
+      const emailErr = validateEmailField(email, false);
+      if (emailErr) {
+        return res.status(400).json({ success: false, message: emailErr, field: 'email' });
+      }
     }
 
     if (!phone || String(phone).trim() === '') {
@@ -187,8 +195,15 @@ export const updateCustomer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const {
-      name, phone, address, customer_type, status, payment_mode
+      name, phone, email, address, customer_type, status, payment_mode
     } = req.body;
+
+    if (email && String(email).trim() !== '') {
+      const emailErr = validateEmailField(email, false);
+      if (emailErr) {
+        return res.status(400).json({ success: false, message: emailErr, field: 'email' });
+      }
+    }
 
     const [existing] = await req.db.query('SELECT * FROM customers WHERE id = ?', [id]);
     if (existing.length === 0) {

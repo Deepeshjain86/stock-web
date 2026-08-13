@@ -1,6 +1,7 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification, checkStockAlerts } from '../services/notificationService.js';
 import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
+import { recordValuationLayer } from '../services/valuationLayerService.js';
 
 // @desc    Get inventory summary across all warehouses for authenticated tenant
 // @route   GET /api/stock
@@ -41,12 +42,25 @@ export const adjustStock = async (req, res, next) => {
   try {
     await connection.beginTransaction();
 
-    const { product_id, warehouse_id, type, quantity, notes, reason, batch_number, mfg_date, exp_date } = req.body;
+    const { 
+      product_id, 
+      warehouse_id = 1, 
+      type, 
+      quantity, 
+      unit_cost, 
+      notes, 
+      reason, 
+      remarks, 
+      batch_id, 
+      batch_number, 
+      mfg_date, 
+      exp_date 
+    } = req.body;
 
-    if (!product_id || !warehouse_id || !type || quantity === undefined) {
+    if (!product_id || !type || quantity === undefined) {
       await connection.rollback();
       connection.release();
-      return res.status(400).json({ success: false, message: 'Missing fields: product_id, warehouse_id, type, and quantity' });
+      return res.status(400).json({ success: false, message: 'Missing required fields: product_id, type, and quantity' });
     }
 
     const qty = Number(quantity);
@@ -56,7 +70,15 @@ export const adjustStock = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Quantity must be a valid positive number' });
     }
 
-    const vendorId = req.body.vendor_id || null;
+    const adjType = (type === 'add' || type === 'Increase') ? 'Increase' : (type === 'subtract' || type === 'Decrease') ? 'Decrease' : type;
+    if (adjType !== 'Increase' && adjType !== 'Decrease' && type !== 'set') {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Invalid adjustment type. Use "Increase" or "Decrease"' });
+    }
+
+    const finalReason = reason || 'Physical Count Difference';
+    const finalRemarks = remarks || notes || '';
 
     // Check existing stock row for this product+warehouse
     const [stockCheck] = await connection.query(
@@ -64,114 +86,443 @@ export const adjustStock = async (req, res, next) => {
       [product_id, warehouse_id]
     );
 
-    let currentQty = stockCheck.length > 0 ? Number(stockCheck[0].quantity) : 0;
+    const currentQty = stockCheck.length > 0 ? Number(stockCheck[0].quantity) : 0;
     let newQty = 0;
+    let deltaQty = 0;
 
-    if (type === 'add') {
+    if (adjType === 'Increase') {
+      deltaQty = qty;
       newQty = currentQty + qty;
-    } else if (type === 'subtract') {
+    } else if (adjType === 'Decrease') {
       if (currentQty < qty) {
         await connection.rollback();
         connection.release();
-        return res.status(400).json({ success: false, message: `Insufficient stock. Total available: ${currentQty}, trying to subtract: ${qty}` });
+        return res.status(400).json({ success: false, message: `Insufficient stock. Current stock: ${currentQty}, Requested reduction: ${qty}` });
       }
+      deltaQty = -qty;
       newQty = currentQty - qty;
-      if (newQty < 0) newQty = 0;
     } else if (type === 'set') {
+      deltaQty = qty - currentQty;
       newQty = qty;
-    } else {
+    }
+
+    const effectiveAdjType = deltaQty >= 0 ? 'Increase' : 'Decrease';
+    const absDeltaQty = Math.abs(deltaQty);
+
+    // Fetch product information & default costs
+    const [[prod]] = await connection.query('SELECT name, mrp, selling_price, purchase_price FROM products WHERE id = ?', [product_id]);
+    if (!prod) {
       await connection.rollback();
       connection.release();
-      return res.status(400).json({ success: false, message: 'Invalid adjustment type. Use "add", "subtract", or "set"' });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
+
+    // Determine unit cost
+    let computedUnitCost = Number(unit_cost || 0);
+    if (!computedUnitCost || computedUnitCost <= 0) {
+      if (batch_id) {
+        const [[bRow]] = await connection.query('SELECT purchase_price FROM purchase_batches WHERE id = ?', [batch_id]);
+        if (bRow && Number(bRow.purchase_price) > 0) {
+          computedUnitCost = Number(bRow.purchase_price);
+        }
+      } else if (batch_number) {
+        const [[bRow]] = await connection.query('SELECT purchase_price FROM purchase_batches WHERE product_id = ? AND batch_number = ? LIMIT 1', [product_id, batch_number]);
+        if (bRow && Number(bRow.purchase_price) > 0) {
+          computedUnitCost = Number(bRow.purchase_price);
+        }
+      }
+    }
+    if (!computedUnitCost || computedUnitCost <= 0) {
+      computedUnitCost = Number(prod.purchase_price || 0);
+    }
+    if (!computedUnitCost || computedUnitCost <= 0) {
+      computedUnitCost = Number(prod.selling_price || 0);
+    }
+    if (!computedUnitCost || computedUnitCost <= 0) {
+      computedUnitCost = Number(prod.mrp || 0);
+    }
+    if (computedUnitCost > 0 && Number(prod.purchase_price || 0) === 0) {
+      await connection.query('UPDATE products SET purchase_price = ? WHERE id = ?', [computedUnitCost, product_id]);
+    }
+
+    const adjustmentValue = Number((absDeltaQty * computedUnitCost).toFixed(2));
+    const financialImpact = effectiveAdjType === 'Increase' ? 'Gain' : 'Loss';
 
     // Update or insert stock row
     if (stockCheck.length > 0) {
-      await connection.query(
-        'UPDATE stock SET quantity = ? WHERE id = ?',
-        [newQty, stockCheck[0].id]
-      );
+      await connection.query('UPDATE stock SET quantity = ? WHERE id = ?', [newQty, stockCheck[0].id]);
     } else {
-      await connection.query(
-        'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)',
-        [product_id, warehouse_id, newQty]
-      );
+      await connection.query('INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)', [product_id, warehouse_id, newQty]);
     }
 
-    // ── Synchronize purchase_batches for manual stock adjustment ──────────────
-    const changeAmount = newQty - currentQty;
-    if (changeAmount > 0) {
-      const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [product_id]);
-      const defaultMrp = Number(prod?.mrp || 0);
-      const defaultSellingPrice = Number(prod?.selling_price || 0);
-      const defaultPurchasePrice = Number(prod?.purchase_price || 0);
+    // Synchronize purchase_batches
+    let targetBatchId = batch_id || null;
+    let targetBatchNo = batch_number || null;
+
+    if (effectiveAdjType === 'Increase') {
+      const defaultMrp = Number(prod.mrp || 0);
+      const defaultSellingPrice = Number(prod.selling_price || 0);
       const finalBatchNo = batch_number || `ADJ-BATCH-${Date.now()}`;
+      targetBatchNo = finalBatchNo;
       const finalExpDate = exp_date || null;
 
-      await connection.query(
+      const [bRes] = await connection.query(
         `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, expiry_date, purchase_price, mrp, selling_price, warehouse_id)
          VALUES (?, ?, ?, ?, CURRENT_DATE(), ?, ?, ?, ?, ?)`,
-        [product_id, finalBatchNo, changeAmount, changeAmount, finalExpDate, defaultPurchasePrice, defaultMrp, defaultSellingPrice, warehouse_id]
+        [product_id, finalBatchNo, absDeltaQty, absDeltaQty, finalExpDate, computedUnitCost, defaultMrp, defaultSellingPrice, warehouse_id]
       );
+      targetBatchId = bRes.insertId;
 
       if (finalExpDate) {
         await connection.query('UPDATE products SET expiry_date = ? WHERE id = ?', [finalExpDate, product_id]);
       }
-    } else if (changeAmount < 0) {
-      let remDeduct = Math.abs(changeAmount);
-      const [pbRows] = await connection.query(
-        `SELECT id, remaining_quantity FROM purchase_batches WHERE product_id = ? AND remaining_quantity > 0 ORDER BY purchase_date ASC, id ASC`,
-        [product_id]
-      );
-      for (const pbRow of pbRows) {
-        if (remDeduct <= 0) break;
-        const curPBQty = Number(pbRow.remaining_quantity);
-        const pbDeduct = Math.min(curPBQty, remDeduct);
-        await connection.query('UPDATE purchase_batches SET remaining_quantity = remaining_quantity - ? WHERE id = ?', [pbDeduct, pbRow.id]);
-        remDeduct -= pbDeduct;
+    } else if (effectiveAdjType === 'Decrease') {
+      let remDeduct = absDeltaQty;
+      if (batch_id || batch_number) {
+        const queryStr = batch_id ? 'SELECT id, remaining_quantity FROM purchase_batches WHERE id = ?' : 'SELECT id, remaining_quantity FROM purchase_batches WHERE product_id = ? AND batch_number = ?';
+        const queryVal = batch_id ? [batch_id] : [product_id, batch_number];
+        const [pbRows] = await connection.query(queryStr, queryVal);
+        if (pbRows.length > 0) {
+          const pbRow = pbRows[0];
+          const curPBQty = Number(pbRow.remaining_quantity);
+          const pbDeduct = Math.min(curPBQty, remDeduct);
+          await connection.query('UPDATE purchase_batches SET remaining_quantity = remaining_quantity - ? WHERE id = ?', [pbDeduct, pbRow.id]);
+          remDeduct -= pbDeduct;
+        }
+      }
+      if (remDeduct > 0) {
+        const [pbRows] = await connection.query(
+          `SELECT id, remaining_quantity FROM purchase_batches WHERE product_id = ? AND remaining_quantity > 0 ORDER BY purchase_date ASC, id ASC`,
+          [product_id]
+        );
+        for (const pbRow of pbRows) {
+          if (remDeduct <= 0) break;
+          const curPBQty = Number(pbRow.remaining_quantity);
+          const pbDeduct = Math.min(curPBQty, remDeduct);
+          await connection.query('UPDATE purchase_batches SET remaining_quantity = remaining_quantity - ? WHERE id = ?', [pbDeduct, pbRow.id]);
+          remDeduct -= pbDeduct;
+        }
       }
     }
-    const finalReason = reason || 'Manual Recount';
-    const notesDetails = notes && notes.startsWith('Reason:') ? notes : `Reason: ${finalReason} | Remarks: ${notes || 'None'}`;
-    
-    await connection.query(
-      `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
-       VALUES (?, ?, ?, 'Adjustment', ?, 'ADJUSTMENT', ?, ?, ?, ?)`,
-      [product_id, warehouse_id, vendorId, changeAmount, notesDetails, req.user.id, currentQty, newQty]
+
+    // Insert Record into stock_adjustments table
+    const adjustmentNo = `ADJ-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100)}`;
+    const prevVal = Number((currentQty * computedUnitCost).toFixed(2));
+    const newVal = Number((newQty * computedUnitCost).toFixed(2));
+    const acctTreatment = (finalReason === 'Damaged' || finalReason === 'Expired' || finalReason === 'Lost' || finalReason === 'Wastage') ? 'Inventory Loss' : 'Inventory Variation';
+
+    const [adjRes] = await connection.query(
+      `INSERT INTO stock_adjustments 
+       (adjustment_no, product_id, warehouse_id, batch_id, batch_number, adjustment_type, quantity, unit_cost, adjustment_value, reason, financial_impact, remarks, previous_quantity, new_quantity, previous_inventory_value, new_inventory_value, accounting_treatment, user_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Completed')`,
+      [
+        adjustmentNo,
+        product_id,
+        warehouse_id,
+        targetBatchId,
+        targetBatchNo,
+        effectiveAdjType,
+        absDeltaQty,
+        computedUnitCost,
+        adjustmentValue,
+        finalReason,
+        financialImpact,
+        finalRemarks,
+        currentQty,
+        newQty,
+        prevVal,
+        newVal,
+        acctTreatment,
+        req.user?.id || 1
+      ]
     );
 
-    // Sync FIFO active batch Expiry Date and MRP on Product master
-    await syncProductFifoState(connection, product_id);
+    // Record Valuation Layer
+    await recordValuationLayer(connection, {
+      productId: product_id,
+      warehouseId: warehouse_id,
+      batchId: targetBatchId,
+      transactionType: (finalReason === 'Damaged' || finalReason === 'Expired' || finalReason === 'Wastage') ? 'Scrap/Wastage' : 'Stock Adjustment',
+      referenceNo: adjustmentNo,
+      quantityDelta: deltaQty,
+      unitCost: computedUnitCost,
+      valueDelta: Number((deltaQty * computedUnitCost).toFixed(2)),
+      previousQuantity: currentQty,
+      newQuantity: newQty,
+      previousInventoryValue: prevVal,
+      newInventoryValue: newVal,
+      accountingTreatment: acctTreatment,
+      createdBy: req.user?.id || 1
+    });
 
-    // Get product name for log
-    const [pInfo] = await connection.query('SELECT name FROM products WHERE id = ?', [product_id]);
-    const pName = pInfo[0]?.name || 'Unknown';
+    // Insert Stock History Log
+    const structuredNotes = `Reason: ${finalReason} | Remarks: ${finalRemarks || 'None'} | Batch: ${targetBatchNo || 'N/A'}`;
+    await connection.query(
+      `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
+       VALUES (?, ?, NULL, 'STOCK_ADJUSTMENT', ?, ?, ?, ?, ?, ?)`,
+      [product_id, warehouse_id, deltaQty, adjustmentNo, structuredNotes, req.user?.id || 1, currentQty, newQty]
+    );
+
+    // Sync FIFO active batch state on Product master
+    await syncProductFifoState(connection, product_id);
 
     await connection.commit();
 
     await logActivity(
-      req.user.id,
+      req.user?.id || 1,
       'Adjust Stock',
       'Stock',
-      `Adjusted stock of "${pName}" in warehouse ${warehouse_id} by ${changeAmount} (New: ${newQty})`,
+      `Created Stock Adjustment ${adjustmentNo} for "${prod.name}": ${effectiveAdjType} ${absDeltaQty} Pcs @ ₹${computedUnitCost} (Valuation: ₹${adjustmentValue}, Impact: ${financialImpact})`,
       req.ip
     );
 
     await createNotification({
       type: 'Stock Update',
-      title: 'Stock Adjusted Manually',
-      message: `Stock of product "${pName}" was adjusted by ${changeAmount >= 0 ? '+' : ''}${changeAmount}. New quantity: ${newQty}.`,
+      title: 'Stock Adjustment Created',
+      message: `Stock Adjustment ${adjustmentNo} for "${prod.name}" (${effectiveAdjType} ${absDeltaQty} Pcs, Value: ₹${adjustmentValue}). New Stock: ${newQty}.`,
       priority: 'Medium',
-      related_user: req.user.email,
+      related_user: req.user?.email || 'System',
       related_module: 'Inventory',
       target_roles: 'Admin,Manager,Staff'
     }, connection);
 
-    await checkStockAlerts(connection, product_id, req.user.id);
+    await checkStockAlerts(connection, product_id, req.user?.id || 1);
 
     return res.status(200).json({
       success: true,
-      message: 'Stock adjusted successfully',
+      message: 'Stock adjustment recorded successfully',
+      adjustment_id: adjRes.insertId,
+      adjustment_no: adjustmentNo,
+      newQuantity: newQty,
+      adjustmentValue,
+      financialImpact
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+};
+
+// @desc    Get all stock adjustments with filtering and pagination
+// @route   GET /api/stock/adjustments
+// @access  Private
+export const getStockAdjustments = async (req, res, next) => {
+  try {
+    const { productId, type, reason, startDate, endDate, page = 1, limit = 50 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let query = `
+      SELECT sa.*, 
+             p.name as product_name, p.barcode, p.sku, p.unit,
+             c.name as category_name,
+             w.name as warehouse_name,
+             u.name as user_name
+      FROM stock_adjustments sa
+      JOIN products p ON sa.product_id = p.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      JOIN warehouses w ON sa.warehouse_id = w.id
+      LEFT JOIN users u ON sa.user_id = u.id
+      WHERE 1=1
+    `;
+    const queryParams = [];
+
+    if (productId) {
+      query += ' AND sa.product_id = ?';
+      queryParams.push(productId);
+    }
+    if (type && type !== 'all' && type !== 'All') {
+      query += ' AND sa.adjustment_type = ?';
+      queryParams.push(type);
+    }
+    if (reason && reason !== 'all' && reason !== 'All') {
+      query += ' AND sa.reason = ?';
+      queryParams.push(reason);
+    }
+    if (startDate) {
+      query += ' AND sa.created_at >= ?';
+      queryParams.push(`${startDate} 00:00:00`);
+    }
+    if (endDate) {
+      query += ' AND sa.created_at <= ?';
+      queryParams.push(`${endDate} 23:59:59`);
+    }
+
+    query += ' ORDER BY sa.id DESC LIMIT ? OFFSET ?';
+    queryParams.push(Number(limit), Number(offset));
+
+    const [adjustments] = await req.db.query(query, queryParams);
+
+    return res.status(200).json({
+      success: true,
+      count: adjustments.length,
+      adjustments
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Reverse a completed stock adjustment (Controlled Reversal)
+// @route   POST /api/stock/adjust/:id/reverse
+// @access  Private
+export const reverseStockAdjustment = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+    const { reason: reversalReason = 'Reversal of incorrect adjustment' } = req.body;
+
+    const [adjRows] = await connection.query('SELECT * FROM stock_adjustments WHERE id = ? FOR UPDATE', [id]);
+    if (adjRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'Stock adjustment record not found' });
+    }
+
+    const origAdj = adjRows[0];
+    if (origAdj.status === 'Reversed') {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'This stock adjustment has already been reversed' });
+    }
+
+    const productId = origAdj.product_id;
+    const warehouseId = origAdj.warehouse_id;
+    const origType = origAdj.adjustment_type;
+    const origQty = Number(origAdj.quantity);
+    const unitCost = Number(origAdj.unit_cost);
+    const origValue = Number(origAdj.adjustment_value);
+
+    // Current stock check
+    const [stockRows] = await connection.query('SELECT id, quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1', [productId, warehouseId]);
+    const currentQty = stockRows.length > 0 ? Number(stockRows[0].quantity) : 0;
+
+    let reverseType = 'Decrease';
+    let deltaQty = -origQty;
+    let newQty = currentQty - origQty;
+    let reverseImpact = 'Loss';
+
+    if (origType === 'Decrease') {
+      reverseType = 'Increase';
+      deltaQty = origQty;
+      newQty = currentQty + origQty;
+      reverseImpact = 'Gain';
+    } else {
+      // If reversing an Increase, verify stock sufficiency
+      if (currentQty < origQty) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({ success: false, message: `Cannot reverse adjustment: current stock (${currentQty}) is less than original adjustment qty (${origQty})` });
+      }
+    }
+
+    // Update Stock quantity
+    await connection.query('UPDATE stock SET quantity = ? WHERE id = ?', [newQty, stockRows[0].id]);
+
+    // Update purchase_batches
+    if (reverseType === 'Increase') {
+      await connection.query(
+        `INSERT INTO purchase_batches (product_id, batch_number, purchase_quantity, remaining_quantity, purchase_date, purchase_price, warehouse_id)
+         VALUES (?, ?, ?, ?, CURRENT_DATE(), ?, ?)`,
+        [productId, `REV-${origAdj.adjustment_no}`, origQty, origQty, unitCost, warehouseId]
+      );
+    } else {
+      let remDeduct = origQty;
+      if (origAdj.batch_id) {
+        await connection.query('UPDATE purchase_batches SET remaining_quantity = GREATEST(0, remaining_quantity - ?) WHERE id = ?', [origQty, origAdj.batch_id]);
+      } else {
+        const [pbRows] = await connection.query(
+          'SELECT id, remaining_quantity FROM purchase_batches WHERE product_id = ? AND remaining_quantity > 0 ORDER BY purchase_date ASC, id ASC',
+          [productId]
+        );
+        for (const pbRow of pbRows) {
+          if (remDeduct <= 0) break;
+          const curPBQty = Number(pbRow.remaining_quantity);
+          const pbDeduct = Math.min(curPBQty, remDeduct);
+          await connection.query('UPDATE purchase_batches SET remaining_quantity = remaining_quantity - ? WHERE id = ?', [pbDeduct, pbRow.id]);
+          remDeduct -= pbDeduct;
+        }
+      }
+    }
+
+    // Mark original status = 'Reversed'
+    await connection.query('UPDATE stock_adjustments SET status = "Reversed" WHERE id = ?', [id]);
+
+    // Insert reversal adjustment record
+    const reversalNo = `${origAdj.adjustment_no}-REV`;
+    const prevRevVal = Number((currentQty * unitCost).toFixed(2));
+    const newRevVal = Number((newQty * unitCost).toFixed(2));
+
+    const [revRes] = await connection.query(
+      `INSERT INTO stock_adjustments 
+       (adjustment_no, product_id, warehouse_id, batch_id, batch_number, adjustment_type, quantity, unit_cost, adjustment_value, reason, financial_impact, remarks, previous_quantity, new_quantity, previous_inventory_value, new_inventory_value, accounting_treatment, user_id, status, reversal_ref_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Inventory Reversal', ?, 'Completed', ?)`,
+      [
+        reversalNo,
+        productId,
+        warehouseId,
+        origAdj.batch_id,
+        origAdj.batch_number,
+        reverseType,
+        origQty,
+        unitCost,
+        origValue,
+        `Reversal of ${origAdj.adjustment_no}: ${reversalReason}`,
+        reverseImpact,
+        `Reversal reference ADJ ID #${id}`,
+        currentQty,
+        newQty,
+        prevRevVal,
+        newRevVal,
+        req.user?.id || 1,
+        id
+      ]
+    );
+
+    // Record Valuation Layer for Reversal
+    await recordValuationLayer(connection, {
+      productId,
+      warehouseId,
+      batchId: origAdj.batch_id,
+      transactionType: 'Stock Adjustment',
+      referenceNo: reversalNo,
+      quantityDelta: deltaQty,
+      unitCost,
+      valueDelta: Number((deltaQty * unitCost).toFixed(2)),
+      previousQuantity: currentQty,
+      newQuantity: newQty,
+      previousInventoryValue: prevRevVal,
+      newInventoryValue: newRevVal,
+      accountingTreatment: 'Inventory Reversal',
+      createdBy: req.user?.id || 1
+    });
+
+    // Insert Stock History Log
+    await connection.query(
+      `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
+       VALUES (?, ?, NULL, 'STOCK_ADJUSTMENT_REVERSAL', ?, ?, ?, ?, ?, ?)`,
+      [productId, warehouseId, deltaQty, reversalNo, `Reversal of ${origAdj.adjustment_no} | ${reversalReason}`, req.user?.id || 1, currentQty, newQty]
+    );
+
+    await syncProductFifoState(connection, productId);
+
+    await connection.commit();
+
+    await logActivity(
+      req.user?.id || 1,
+      'Reverse Stock Adjustment',
+      'Stock',
+      `Reversed Stock Adjustment ${origAdj.adjustment_no} (${reversalNo})`,
+      req.ip
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Stock adjustment ${origAdj.adjustment_no} successfully reversed`,
+      reversal_no: reversalNo,
       newQuantity: newQty
     });
   } catch (error) {
@@ -181,6 +532,7 @@ export const adjustStock = async (req, res, next) => {
     connection.release();
   }
 };
+
 
 // @desc    Transfer stock between warehouses
 // @route   POST /api/stock/transfer
@@ -407,5 +759,84 @@ export const getStockTransfers = async (req, res, next) => {
     return res.status(200).json({ success: true, transfers });
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Revalue product inventory unit cost without changing physical stock quantity
+// @route   POST /api/stock/revaluation
+// @access  Private
+export const revalueInventory = async (req, res, next) => {
+  const connection = await req.db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { product_id, warehouse_id = 1, batch_id, new_unit_cost, reason, remarks } = req.body;
+
+    const newCost = Number(new_unit_cost);
+    if (!product_id || isNaN(newCost) || newCost < 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Invalid product_id or new_unit_cost' });
+    }
+
+    const [[prod]] = await connection.query('SELECT name, purchase_price FROM products WHERE id = ?', [product_id]);
+    if (!prod) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    const oldCost = Number(prod.purchase_price || 0);
+
+    const [stockRows] = await connection.query('SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1', [product_id, warehouse_id]);
+    const currentQty = stockRows.length > 0 ? Number(stockRows[0].quantity) : 0;
+
+    const prevValue = Number((currentQty * oldCost).toFixed(2));
+    const newValue = Number((currentQty * newCost).toFixed(2));
+    const valueDelta = Number((newValue - prevValue).toFixed(2));
+
+    await connection.query('UPDATE products SET purchase_price = ? WHERE id = ?', [newCost, product_id]);
+
+    if (batch_id) {
+      await connection.query('UPDATE purchase_batches SET purchase_price = ? WHERE id = ?', [newCost, batch_id]);
+    }
+
+    const revalNo = `REVAL-${Date.now().toString().slice(-6)}`;
+    await connection.query(
+      `INSERT INTO inventory_revaluations (revaluation_no, product_id, warehouse_id, batch_id, old_unit_cost, new_unit_cost, quantity, value_delta, reason, remarks, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [revalNo, product_id, warehouse_id, batch_id || null, oldCost, newCost, currentQty, valueDelta, reason || 'Cost Correction', remarks || '', req.user?.id || 1]
+    );
+
+    await recordValuationLayer(connection, {
+      productId: product_id,
+      warehouseId: warehouse_id,
+      batchId: batch_id || null,
+      transactionType: 'Revaluation',
+      referenceNo: revalNo,
+      quantityDelta: 0,
+      unitCost: newCost,
+      valueDelta,
+      previousQuantity: currentQty,
+      newQuantity: currentQty,
+      previousInventoryValue: prevValue,
+      newInventoryValue: newValue,
+      accountingTreatment: 'Inventory Revaluation',
+      createdBy: req.user?.id || 1
+    });
+
+    await connection.commit();
+    return res.status(200).json({
+      success: true,
+      message: 'Inventory revalued successfully',
+      revaluation_no: revalNo,
+      oldCost,
+      newCost,
+      valueDelta
+    });
+  } catch (err) {
+    await connection.rollback();
+    next(err);
+  } finally {
+    connection.release();
   }
 };

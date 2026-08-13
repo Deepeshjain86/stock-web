@@ -142,6 +142,15 @@ const StockDashboard = () => {
     if (activeTab === 'current-stock') {
       fetchStockData();
     }
+    const handleEventUpdate = () => {
+      handleStockChanged();
+    };
+    window.addEventListener('stock-changed', handleEventUpdate);
+    window.addEventListener('inventory-updated', handleEventUpdate);
+    return () => {
+      window.removeEventListener('stock-changed', handleEventUpdate);
+      window.removeEventListener('inventory-updated', handleEventUpdate);
+    };
   }, [activeTab]);
 
   // Called by any child tab after a stock-mutating operation
@@ -380,7 +389,7 @@ const StockDashboard = () => {
 
         {activeTab === 'purchase' && <PurchaseList />}
         
-        {activeTab === 'stock-return' && <VendorReturnManagement />}
+        {activeTab === 'stock-return' && <VendorReturnManagement onStockChanged={handleStockChanged} />}
         
         {activeTab === 'stock-destroy' && <StockDestroy onStockChanged={handleStockChanged} />}
         

@@ -4,8 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -18,9 +16,7 @@ import {
   UserGroupIcon,
   BookOpenIcon,
   ArrowPathIcon,
-  ArrowTrendingUpIcon,
   PlusIcon,
-  BuildingStorefrontIcon,
   ChartBarIcon
 } from '@heroicons/react/24/outline';
 import { useAppSelector } from '../../store/hooks';
@@ -42,26 +38,19 @@ const SalesManagerDashboard = () => {
   });
 
   const [recentSales, setRecentSales] = useState([]);
-  const [salesTrend, setSalesTrend] = useState([
-    { day: 'Mon', Sales: 24000, Udhar: 4000 },
-    { day: 'Tue', Sales: 32000, Udhar: 6000 },
-    { day: 'Wed', Sales: 28000, Udhar: 3500 },
-    { day: 'Thu', Sales: 41000, Udhar: 8000 },
-    { day: 'Fri', Sales: 48000, Udhar: 5200 },
-    { day: 'Sat', Sales: 62000, Udhar: 9100 },
-    { day: 'Sun', Sales: 55000, Udhar: 7400 },
-  ]);
+  const [salesTrend, setSalesTrend] = useState([]);
 
   const loadSalesData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
     try {
-      const [kpiRes, salesRes, customerRes, borrowRes] = await Promise.all([
+      const [kpiRes, salesRes, customerRes, borrowRes, chartRes] = await Promise.all([
         reportsAPI.getKPIs().catch(() => null),
         salesAPI.getAll().catch(() => null),
         customersAPI.getAll().catch(() => null),
-        borrowAPI.getSummary().catch(() => null)
+        borrowAPI.getSummary().catch(() => null),
+        reportsAPI.getCharts().catch(() => null)
       ]);
 
       if (kpiRes?.success && kpiRes.kpis) {
@@ -88,6 +77,17 @@ const SalesManagerDashboard = () => {
       if (borrowRes?.success) {
         const udharTotal = borrowRes.summaryTotals?.total_pending || (borrowRes.summary || []).reduce((acc, curr) => acc + Number(curr.balance || 0), 0);
         setKpis(prev => ({ ...prev, totalUdharOutstanding: Number(udharTotal || 0) }));
+      }
+
+      if (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends) && chartRes.charts.monthlyTrends.length > 0) {
+        const trends = chartRes.charts.monthlyTrends.map(t => ({
+          day: t.name,
+          Sales: t.Sales || 0,
+          Udhar: 0
+        }));
+        setSalesTrend(trends);
+      } else {
+        setSalesTrend([]);
       }
     } catch (err) {
       console.error('Sales Dashboard fetch error:', err);
@@ -205,21 +205,31 @@ const SalesManagerDashboard = () => {
         <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Daily Sales & Udhaar Trend</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Sales & Udhaar Trend</h3>
               <p className="text-xs text-slate-500">Revenue split between cash/UPI vs credit udhaar billing</p>
             </div>
           </div>
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={salesTrend}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis dataKey="day" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip />
-                <Area type="monotone" dataKey="Sales" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.2} />
-                <Area type="monotone" dataKey="Udhar" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.2} />
-              </AreaChart>
-            </ResponsiveContainer>
+            {salesTrend.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+                <ShoppingBagIcon className="w-10 h-10 text-slate-300 dark:text-slate-600 mb-2 stroke-1" />
+                <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">No Sales Trend Data</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-xs">
+                  Complete POS sales checkout transactions to display billing performance trends.
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={salesTrend}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis dataKey="day" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="Sales" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="Udhar" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 

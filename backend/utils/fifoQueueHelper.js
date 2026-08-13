@@ -58,10 +58,15 @@ export const syncProductFifoState = async (connection, productId) => {
       const frontNode = activeBatches[0];
       const newMrp = Number(frontNode.mrp || 0);
       const newExpiry = frontNode.expiry_date || null;
+      const newPurchasePrice = Number(frontNode.purchase_price || 0);
 
       const updateFields = [];
       const queryParams = [];
 
+      if (newPurchasePrice > 0) {
+        updateFields.push('purchase_price = ?');
+        queryParams.push(newPurchasePrice);
+      }
       if (newMrp > 0) {
         updateFields.push('mrp = ?');
         queryParams.push(newMrp);
@@ -79,7 +84,7 @@ export const syncProductFifoState = async (connection, productId) => {
         );
       }
     } else {
-      // Fallback: If no active batches remain in purchase_batches, check latest grn_items
+      // Fallback: If no active batches remain in purchase_batches, check latest purchase_items / grn_items
       const [latestGrn] = await connection.query(
         `SELECT mrp, expiry_date FROM grn_items WHERE product_id = ? AND mrp > 0 ORDER BY id DESC LIMIT 1`,
         [productId]
@@ -93,6 +98,14 @@ export const syncProductFifoState = async (connection, productId) => {
         if (fallbackExp && fallbackExp !== '0000-00-00' && fallbackExp !== 'N/A') {
           await connection.query('UPDATE products SET expiry_date = ? WHERE id = ?', [fallbackExp, productId]);
         }
+      }
+
+      const [latestPurchaseItem] = await connection.query(
+        `SELECT purchase_price FROM purchase_items WHERE product_id = ? AND purchase_price > 0 ORDER BY id DESC LIMIT 1`,
+        [productId]
+      );
+      if (latestPurchaseItem.length > 0 && Number(latestPurchaseItem[0].purchase_price) > 0) {
+        await connection.query('UPDATE products SET purchase_price = ? WHERE id = ?', [Number(latestPurchaseItem[0].purchase_price), productId]);
       }
     }
   } catch (err) {

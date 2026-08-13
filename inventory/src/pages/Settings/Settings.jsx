@@ -15,6 +15,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { updateProfile } from '../../store/slices/profileSlice';
 import { showToast } from '../../store/slices/notificationSlice';
 import { useStoreLogo, getLogoUrl, setStoreLogo } from '../../utils/logoHelper';
+import { validateEmailField } from '../../utils/validators';
 
 const Settings = () => {
   const dispatch = useAppDispatch();
@@ -201,6 +202,13 @@ const Settings = () => {
 
   // Save General settings
   const handleSaveStoreSettings = async () => {
+    if (storeSettings.store_email && storeSettings.store_email.trim() !== '') {
+      const emailErr = validateEmailField(storeSettings.store_email, false);
+      if (emailErr) {
+        alert(emailErr);
+        return;
+      }
+    }
     if (storeSettings.store_phone && storeSettings.store_phone.replace(/\D/g, '').length !== 10) {
       alert('Store Phone number must be exactly 10 digits.');
       return;
@@ -219,6 +227,11 @@ const Settings = () => {
   const handleSaveProfile = async () => {
     try {
       if (!profileValues.name || !profileValues.email) return;
+      const emailErr = validateEmailField(profileValues.email, true);
+      if (emailErr) {
+        alert(emailErr);
+        return;
+      }
       
       if (!dbOffline) {
         const resultAction = await dispatch(updateProfile({ name: profileValues.name, email: profileValues.email }));

@@ -18,6 +18,7 @@ import { authAPI } from '../../services/api';
 import { useAppDispatch } from '../../store/hooks';
 import { setCredentials } from '../../store/slices/authSlice';
 import ThemeToggle from '../../components/common/ThemeToggle';
+import { validateEmailField } from '../../utils/validators';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -49,6 +50,12 @@ const Register = () => {
     e.preventDefault();
     if (!form.store_name.trim() || !form.owner_name.trim() || !form.email.trim() || !form.password.trim()) {
       setError('Please fill in all required fields (Store Name, Owner Name, Email, Password).');
+      return;
+    }
+
+    const emailErr = validateEmailField(form.email, true);
+    if (emailErr) {
+      setError(emailErr);
       return;
     }
 

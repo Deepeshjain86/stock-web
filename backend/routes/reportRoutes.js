@@ -16,7 +16,9 @@ import {
   getABCAnalysisReport,
   getBatchValuationReport,
   getReservedStockReport,
-  getInventoryReconciliationReport
+  getInventoryReconciliationReport,
+  getStockAdjustmentReport,
+  getValuationLayerReport
 } from '../controllers/reportController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
@@ -43,5 +45,7 @@ router.get('/abc-analysis', getABCAnalysisReport);
 router.get('/batch-valuation', getBatchValuationReport);
 router.get('/reserved-stock', getReservedStockReport);
 router.get('/inventory-reconciliation', getInventoryReconciliationReport);
+router.get('/stock-adjustments', getStockAdjustmentReport);
+router.get('/valuation-layers', getValuationLayerReport);
 
 export default router;

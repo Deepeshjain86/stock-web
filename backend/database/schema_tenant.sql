@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS categories (
   status VARCHAR(20) DEFAULT 'Active',
   sort_order INT DEFAULT 0,
   description TEXT NULL,
+  costing_method ENUM('FIFO', 'AVCO', 'Standard Cost') NOT NULL DEFAULT 'FIFO',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_cat_name_parent (name, parent_id),
@@ -176,6 +177,7 @@ CREATE TABLE IF NOT EXISTS products (
   hsn_code VARCHAR(20) NULL,
   min_stock INT DEFAULT 5,
   max_stock INT DEFAULT 100,
+  standard_cost DECIMAL(12,2) DEFAULT 0.00,
   image_url VARCHAR(255) NULL,
   manufacturing_date DATE NULL,
   expiry_date DATE NULL,
@@ -631,3 +633,90 @@ CREATE TABLE IF NOT EXISTS stock_destroys (
   INDEX idx_destroy_no (destroy_no),
   INDEX idx_product_id (product_id)
 );
+
+-- 25. Stock Adjustments Table
+CREATE TABLE IF NOT EXISTS stock_adjustments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  adjustment_no VARCHAR(50) NOT NULL UNIQUE,
+  product_id INT NOT NULL,
+  warehouse_id INT NOT NULL DEFAULT 1,
+  batch_id INT NULL,
+  batch_number VARCHAR(100) NULL,
+  adjustment_type ENUM('Increase', 'Decrease') NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL,
+  unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  adjustment_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  reason VARCHAR(100) NOT NULL,
+  financial_impact ENUM('Gain', 'Loss', 'None') NOT NULL DEFAULT 'None',
+  remarks TEXT NULL,
+  previous_quantity DECIMAL(12,3) DEFAULT 0.00,
+  new_quantity DECIMAL(12,3) DEFAULT 0.00,
+  previous_inventory_value DECIMAL(12,2) DEFAULT 0.00,
+  new_inventory_value DECIMAL(12,2) DEFAULT 0.00,
+  accounting_treatment VARCHAR(100) DEFAULT 'Inventory Variation',
+  user_id INT NULL,
+  status ENUM('Completed', 'Reversed') NOT NULL DEFAULT 'Completed',
+  reversal_ref_id INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  FOREIGN KEY (batch_id) REFERENCES purchase_batches(id) ON DELETE SET NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (reversal_ref_id) REFERENCES stock_adjustments(id) ON DELETE SET NULL,
+  INDEX idx_adj_no (adjustment_no),
+  INDEX idx_adj_product (product_id),
+  INDEX idx_adj_status (status)
+);
+
+-- 26. Inventory Valuation Layers (Odoo 19 Valuation Ledger)
+CREATE TABLE IF NOT EXISTS inventory_valuation_layers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  product_id INT NOT NULL,
+  warehouse_id INT NOT NULL DEFAULT 1,
+  batch_id INT NULL,
+  transaction_type ENUM('Purchase Receipt', 'Sales Delivery', 'Sales Return', 'Purchase Return', 'Stock Adjustment', 'Scrap/Wastage', 'Stock Transfer', 'Revaluation') NOT NULL,
+  reference_no VARCHAR(100) NOT NULL,
+  quantity_delta DECIMAL(12,3) NOT NULL,
+  unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  value_delta DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  previous_inventory_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  new_inventory_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  previous_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.00,
+  new_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.00,
+  accounting_treatment VARCHAR(100) NULL DEFAULT 'Inventory Variation',
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  FOREIGN KEY (batch_id) REFERENCES purchase_batches(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_ivl_product (product_id),
+  INDEX idx_ivl_type (transaction_type),
+  INDEX idx_ivl_ref (reference_no)
+);
+
+-- 27. Inventory Revaluations Table
+CREATE TABLE IF NOT EXISTS inventory_revaluations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  revaluation_no VARCHAR(50) NOT NULL UNIQUE,
+  product_id INT NOT NULL,
+  warehouse_id INT NOT NULL DEFAULT 1,
+  batch_id INT NULL,
+  old_unit_cost DECIMAL(12,2) NOT NULL,
+  new_unit_cost DECIMAL(12,2) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL,
+  value_delta DECIMAL(12,2) NOT NULL,
+  reason VARCHAR(100) NOT NULL,
+  remarks TEXT NULL,
+  user_id INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  FOREIGN KEY (batch_id) REFERENCES purchase_batches(id) ON DELETE SET NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_rev_no (revaluation_no),
+  INDEX idx_rev_product (product_id)
+);
+
+

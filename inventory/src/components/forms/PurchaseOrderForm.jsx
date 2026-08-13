@@ -64,7 +64,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     if (!product) return;
 
     const rawPrice = customPrice !== '' ? parseFloat(customPrice) : product.purchasePrice;
-    const price = isNaN(rawPrice) || rawPrice <= 0 ? 0 : rawPrice;
+    const price = isNaN(rawPrice) || rawPrice < 0 ? 0 : rawPrice;
     const qty = Number(quantity) || 1;
     const gstRate = parseFloat(itemGst) >= 0 ? parseFloat(itemGst) : 0;
 
@@ -77,6 +77,7 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
       const updated = [...formData.items];
       updated[existsIndex].quantity += qty;
       updated[existsIndex].gst = gstRate;
+      updated[existsIndex].purchase_price = price;
       updated[existsIndex].total = updated[existsIndex].quantity * updated[existsIndex].purchase_price * (1 + gstRate / 100);
       setFormData({ ...formData, items: updated });
     } else {
@@ -101,6 +102,25 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     setItemGst(18);
   };
 
+  const handleItemChange = (index, field, value) => {
+    const updated = [...formData.items];
+    const item = { ...updated[index] };
+
+    if (field === 'quantity') {
+      item.quantity = Math.max(1, Number(value) || 1);
+    } else if (field === 'purchase_price') {
+      const p = parseFloat(value);
+      item.purchase_price = isNaN(p) || p < 0 ? 0 : p;
+    } else if (field === 'gst') {
+      const g = parseFloat(value);
+      item.gst = isNaN(g) || g < 0 ? 0 : g;
+    }
+
+    item.total = item.purchase_price * item.quantity * (1 + (item.gst || 0) / 100);
+    updated[index] = item;
+    setFormData({ ...formData, items: updated });
+  };
+
   const handleRemoveItem = (index) => {
     const updated = formData.items.filter((_, i) => i !== index);
     setFormData({ ...formData, items: updated });
@@ -111,9 +131,9 @@ const PurchaseOrderForm = ({ onSubmit, onCancel }) => {
     let autoGstAmount = 0;
 
     formData.items.forEach((item) => {
-      const base = item.purchase_price * item.quantity;
+      const base = Number(item.purchase_price || 0) * Number(item.quantity || 0);
       subtotal += base;
-      autoGstAmount += base * ((item.gst || 0) / 100);
+      autoGstAmount += base * ((Number(item.gst) || 0) / 100);
     });
 
     const gstAmount = manualGst !== '' && !isNaN(parseFloat(manualGst))

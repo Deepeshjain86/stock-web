@@ -308,15 +308,23 @@ export const calculateNetProfit = async (db, filters = {}) => {
   const sales = await calculateTotalSales(db, filters);
   const cogs = await calculateCOGS(db, filters);
   const stockDestroy = await calculateStockDestroy(db, filters);
+  const stockAdjustments = await calculateStockAdjustments(db, filters);
   
   const grossProfit = Number((sales.netSales - cogs).toFixed(2));
   const operatingExpenses = Number((stockDestroy.destroyCost || 0).toFixed(2));
-  const netProfit = Math.max(0, Number((grossProfit - operatingExpenses).toFixed(2)));
+  const adjustmentGain = Number((stockAdjustments.adjustmentGain || 0).toFixed(2));
+  const adjustmentLoss = Number((stockAdjustments.adjustmentLoss || 0).toFixed(2));
+  const netAdjustment = Number((stockAdjustments.netAdjustment || 0).toFixed(2));
+
+  const netProfit = Math.max(0, Number((grossProfit + adjustmentGain - adjustmentLoss - operatingExpenses).toFixed(2)));
 
   return {
     netSales: sales.netSales,
     cogs,
     grossProfit,
+    adjustmentGain,
+    adjustmentLoss,
+    netAdjustment,
     operatingExpenses,
     netProfit,
     marginPercentage: sales.netSales > 0 ? Number(((grossProfit / sales.netSales) * 100).toFixed(2)) : 0
@@ -454,7 +462,9 @@ export const getExecutiveDashboardKPIs = async (db, filters = {}) => {
   const sales = await calculateTotalSales(db, filters);
   const purchases = await calculatePurchaseExpenses(db, filters);
   const cogs = await calculateCOGS(db, filters);
-  const netProfit = Math.max(0, sales.netSales - cogs);
+  const stockAdjustments = await calculateStockAdjustments(db, filters);
+  const grossProfit = Number((sales.netSales - cogs).toFixed(2));
+  const netProfit = Math.max(0, Number((sales.netSales - cogs + stockAdjustments.adjustmentGain - stockAdjustments.adjustmentLoss).toFixed(2)));
   const inventoryValuation = await calculateInventoryValuation(db, filters);
   const stockCounts = await calculateStockCounts(db, filters);
 
@@ -483,6 +493,8 @@ export const getExecutiveDashboardKPIs = async (db, filters = {}) => {
   const topSelling = await getTopSellingProducts(db, filters, 5);
   const topPurchased = await getTopPurchasedProducts(db, filters, 5);
 
+  const stockDestroy = await calculateStockDestroy(db, filters);
+
   return {
     totalProducts: prodCount[0].count,
     totalCategories: catCount[0].count,
@@ -501,7 +513,14 @@ export const getExecutiveDashboardKPIs = async (db, filters = {}) => {
     salesReturns: sales.salesReturns,
     totalOrders: sales.salesCount,
     cogs,
+    grossProfit,
     profit: netProfit,
+    inventoryAdjustmentGain: stockAdjustments.adjustmentGain,
+    inventoryAdjustmentLoss: stockAdjustments.adjustmentLoss,
+    netInventoryAdjustment: stockAdjustments.netAdjustment,
+    wastageLoss: stockAdjustments.wastageLoss,
+    totalScrappedQty: stockDestroy.destroyQty,
+    totalScrappedValue: stockDestroy.destroyCost,
     inventoryValuation,
     lowStock: stockCounts.lowStockCount,
     outOfStock: stockCounts.outOfStockCount,
@@ -516,7 +535,7 @@ export const getExecutiveDashboardKPIs = async (db, filters = {}) => {
  */
 export const calculateStockDestroy = async (db, filters = {}) => {
   try {
-    let query = `SELECT COALESCE(SUM(total_cost), 0) as destroy_cost, COALESCE(SUM(quantity), 0) as destroy_qty, COUNT(id) as destroy_count FROM stock_destroys WHERE (status IS NULL OR status != 'Cancelled')`;
+    let query = `SELECT COALESCE(SUM(destroy_value), 0) as destroy_cost, COALESCE(SUM(destroy_quantity), 0) as destroy_qty, COUNT(id) as destroy_count FROM stock_destroys WHERE status = 'Confirmed'`;
     const params = [];
     if (filters.startDate || filters.dateFrom) {
       const start = (filters.startDate || filters.dateFrom).split(' ')[0];
@@ -528,6 +547,10 @@ export const calculateStockDestroy = async (db, filters = {}) => {
       query += ` AND DATE(created_at) <= ?`;
       params.push(end);
     }
+    if (filters.productId && filters.productId !== 'all') {
+      query += ` AND product_id = ?`;
+      params.push(Number(filters.productId));
+    }
     const [rows] = await db.query(query, params);
     return {
       destroyCost: Number(rows[0]?.destroy_cost || 0),
@@ -535,7 +558,75 @@ export const calculateStockDestroy = async (db, filters = {}) => {
       destroyCount: Number(rows[0]?.destroy_count || 0)
     };
   } catch (err) {
+    console.error('Error in calculateStockDestroy:', err);
     return { destroyCost: 0, destroyQty: 0, destroyCount: 0 };
+  }
+};
+
+/**
+ * 10b. Stock Adjustment Financial Engine
+ * Tracks Inventory Adjustment Gains, Losses, and Wastage separately from Purchases & Sales.
+ */
+export const calculateStockAdjustments = async (db, filters = {}) => {
+  try {
+    let query = `
+      SELECT 
+        COALESCE(SUM(CASE WHEN adjustment_type = 'Increase' THEN adjustment_value ELSE 0 END), 0) as adjustment_gain,
+        COALESCE(SUM(CASE WHEN adjustment_type = 'Decrease' THEN adjustment_value ELSE 0 END), 0) as adjustment_loss,
+        COALESCE(SUM(CASE WHEN adjustment_type = 'Decrease' AND reason IN ('Damaged', 'Expired', 'Lost', 'Theft', 'Wastage') THEN adjustment_value ELSE 0 END), 0) as wastage_loss,
+        COALESCE(SUM(CASE WHEN adjustment_type = 'Increase' THEN ABS(quantity) ELSE 0 END), 0) as increased_qty,
+        COALESCE(SUM(CASE WHEN adjustment_type = 'Decrease' THEN ABS(quantity) ELSE 0 END), 0) as decreased_qty,
+        COALESCE(SUM(CASE WHEN adjustment_type = 'Decrease' AND reason IN ('Damaged', 'Expired', 'Lost', 'Theft', 'Wastage') THEN ABS(quantity) ELSE 0 END), 0) as wastage_qty,
+        COUNT(id) as adjustment_count
+      FROM stock_adjustments
+      WHERE status = 'Completed'
+    `;
+    const params = [];
+    if (filters.startDate || filters.dateFrom) {
+      const start = (filters.startDate || filters.dateFrom).split(' ')[0];
+      query += ` AND DATE(created_at) >= ?`;
+      params.push(start);
+    }
+    if (filters.endDate || filters.dateTo) {
+      const end = (filters.endDate || filters.dateTo).split(' ')[0];
+      query += ` AND DATE(created_at) <= ?`;
+      params.push(end);
+    }
+    if (filters.productId && filters.productId !== 'all') {
+      query += ` AND product_id = ?`;
+      params.push(Number(filters.productId));
+    }
+    if (filters.warehouseId && filters.warehouseId !== 'all') {
+      query += ` AND warehouse_id = ?`;
+      params.push(Number(filters.warehouseId));
+    }
+    const [rows] = await db.query(query, params);
+    const gain = Number(rows[0]?.adjustment_gain || 0);
+    const loss = Number(rows[0]?.adjustment_loss || 0);
+    const wastage = Number(rows[0]?.wastage_loss || 0);
+    const incQty = Number(rows[0]?.increased_qty || 0);
+    const decQty = Number(rows[0]?.decreased_qty || 0);
+    const wstQty = Number(rows[0]?.wastage_qty || 0);
+    const count = Number(rows[0]?.adjustment_count || 0);
+
+    const netVal = Number((gain - loss).toFixed(2));
+    const netQ = Number((incQty - decQty).toFixed(2));
+
+    return {
+      adjustmentGain: Number(gain.toFixed(2)),
+      adjustmentLoss: Number(loss.toFixed(2)),
+      netAdjustment: netVal,
+      netInventoryAdjustment: netVal,
+      wastageLoss: Number(wastage.toFixed(2)),
+      increasedQty: incQty,
+      decreasedQty: decQty,
+      netQty: netQ,
+      wastageQty: wstQty,
+      adjustmentCount: count
+    };
+  } catch (err) {
+    console.error('Error in calculateStockAdjustments:', err);
+    return { adjustmentGain: 0, adjustmentLoss: 0, netAdjustment: 0, netInventoryAdjustment: 0, wastageLoss: 0, increasedQty: 0, decreasedQty: 0, netQty: 0, wastageQty: 0, adjustmentCount: 0 };
   }
 };
 
@@ -869,6 +960,64 @@ export const validateInventoryConsistency = async (db) => {
     };
   } catch (err) {
     return { isConsistent: false, discrepancyCount: 1, discrepancies: [{ error: err.message }], checkedAt: new Date().toISOString() };
+  }
+};
+
+/**
+ * 18. Inventory Valuation Drill-Down Engine (Odoo 19 Ledger Breakdown)
+ * Breaks down inventory valuation impact by transaction source.
+ */
+export const getValuationDrillDown = async (db, filters = {}) => {
+  try {
+    let query = `
+      SELECT ivl.id, ivl.transaction_type, ivl.reference_no, ivl.product_id, p.name as product_name,
+             ivl.quantity_delta, ivl.unit_cost, ivl.value_delta, ivl.previous_inventory_value,
+             ivl.new_inventory_value, ivl.accounting_treatment, ivl.created_at,
+             w.name as warehouse_name, u.name as user_name
+      FROM inventory_valuation_layers ivl
+      JOIN products p ON ivl.product_id = p.id
+      LEFT JOIN warehouses w ON ivl.warehouse_id = w.id
+      LEFT JOIN users u ON ivl.created_by = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (filters.startDate || filters.dateFrom) {
+      query += ` AND DATE(ivl.created_at) >= ?`;
+      params.push(filters.startDate || filters.dateFrom);
+    }
+    if (filters.endDate || filters.dateTo) {
+      query += ` AND DATE(ivl.created_at) <= ?`;
+      params.push(filters.endDate || filters.dateTo);
+    }
+    if (filters.productId && filters.productId !== 'all') {
+      query += ` AND ivl.product_id = ?`;
+      params.push(Number(filters.productId));
+    }
+    if (filters.transactionType && filters.transactionType !== 'all') {
+      query += ` AND ivl.transaction_type = ?`;
+      params.push(filters.transactionType);
+    }
+    query += ` ORDER BY ivl.id DESC LIMIT 100`;
+
+    const [rows] = await db.query(query, params);
+
+    let summaryQuery = `
+      SELECT transaction_type, 
+             COALESCE(SUM(quantity_delta), 0) as total_qty_delta,
+             COALESCE(SUM(value_delta), 0) as total_value_delta
+      FROM inventory_valuation_layers
+      GROUP BY transaction_type
+    `;
+    const [summaryRows] = await db.query(summaryQuery);
+
+    return {
+      success: true,
+      layers: rows,
+      summary: summaryRows
+    };
+  } catch (err) {
+    console.error('[ValuationDrillDown] Error:', err);
+    return { success: false, layers: [], summary: [] };
   }
 };
 

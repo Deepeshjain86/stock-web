@@ -35,8 +35,8 @@ export const protect = async (req, res, next) => {
       user.name = 'Super Admin'; // Display Name for Super Admin
       user.permissions = ['all'];
 
-      // Check if Super Admin is monitoring a specific store database
-      const tenantIdHeader = req.headers['x-tenant-id'];
+      // Check if Super Admin is monitoring a specific store database or specified tenantId
+      const tenantIdHeader = req.headers['x-tenant-id'] || req.query?.tenantId || req.query?.tenant_id || req.body?.tenant_id || req.body?.tenantId;
       if (tenantIdHeader) {
         const [tenants] = await masterPool.query(
           'SELECT database_name FROM tenants WHERE id = ?',
@@ -47,6 +47,12 @@ export const protect = async (req, res, next) => {
           monitoredTenantId = tenantIdHeader;
           db = getTenantPool(tenantDbName);
         }
+      }
+
+      // If token specifies a tenantDbName, fallback to token tenantDbName
+      if (!db && decoded.tenantDbName && decoded.tenantDbName !== 'kirana_erp_master') {
+        tenantDbName = decoded.tenantDbName;
+        db = getTenantPool(tenantDbName);
       }
 
       // If Super Admin has no monitored tenant specified, fall back to first active tenant database for operational queries

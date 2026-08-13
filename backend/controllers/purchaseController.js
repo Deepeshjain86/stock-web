@@ -897,6 +897,7 @@ import { logActivity } from '../utils/activityLogger.js';
 import { createNotification, checkStockAlerts } from '../services/notificationService.js';
 import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
 import { formatDateToYYYYMMDD } from '../utils/dateFormatter.js';
+import { recordValuationLayer } from '../services/valuationLayerService.js';
 
 const parseToISODate = (val) => {
   if (!val || val === 'N/A' || val === 'null' || val === 'undefined' || val === '0000-00-00') return null;
@@ -1024,8 +1025,8 @@ export const createPurchase = async (req, res, next) => {
   try {
     await connection.beginTransaction();
 
-    const vendor_id = req.body.vendor_id || req.body.vendorId;
-    const warehouse_id = req.body.warehouse_id || req.body.warehouseId || 1;
+    let vendor_id = Number(req.body.vendor_id || req.body.vendorId || 0);
+    let warehouse_id = Number(req.body.warehouse_id || req.body.warehouseId || 1);
     const date = req.body.date || req.body.purchase_date || new Date().toISOString().split('T')[0];
     const subtotal = req.body.subtotal || 0;
     const discount = req.body.discount || 0;
@@ -1037,6 +1038,21 @@ export const createPurchase = async (req, res, next) => {
     const items = req.body.items;
     const purchase_order_id = req.body.purchase_order_id || req.body.purchaseOrderId || null;
     const grn_id = req.body.grn_id || req.body.grnId || null;
+
+    if ((!vendor_id || vendor_id === 0) && purchase_order_id) {
+      const [poRow] = await connection.query('SELECT vendor_id, warehouse_id FROM purchase_orders WHERE id = ?', [purchase_order_id]);
+      if (poRow.length > 0) {
+        vendor_id = Number(poRow[0].vendor_id);
+        if (!warehouse_id) warehouse_id = Number(poRow[0].warehouse_id || 1);
+      }
+    }
+
+    if (!vendor_id || vendor_id === 0) {
+      const [vFirst] = await connection.query('SELECT id FROM vendors LIMIT 1');
+      if (vFirst.length > 0) {
+        vendor_id = Number(vFirst[0].id);
+      }
+    }
 
     console.log('[createPurchase] parsed vendor_id:', vendor_id, 'items:', items);
 
@@ -1131,7 +1147,8 @@ export const createPurchase = async (req, res, next) => {
 
     // Loop items to save & update stock
     for (const item of items) {
-      const targetProductId = Number(item.product_id || item.productId);
+      const targetProductId = Number(item.product_id || item.productId || 0);
+      if (!targetProductId || isNaN(targetProductId)) continue;
       const [[prod]] = await connection.query('SELECT mrp, selling_price, purchase_price FROM products WHERE id = ?', [targetProductId]);
       const defaultProdSellingPrice = prod ? Number(prod.selling_price || 0) : 0;
       const defaultProdMrp = prod ? Number(prod.mrp || 0) : 0;
@@ -1141,6 +1158,7 @@ export const createPurchase = async (req, res, next) => {
       const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
       const itemPurchasePrice = item.purchase_price && Number(item.purchase_price) > 0 ? Number(item.purchase_price) : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice);
       const itemQty = Number(item.quantity_received ?? item.received_quantity ?? item.quantity ?? 0);
+      const itemGst = Number(item.gst || item.gst_amount || item.tax || 0);
       const itemTotal = Number(item.total || (itemQty * itemPurchasePrice));
 
       await connection.query(
@@ -1173,7 +1191,7 @@ export const createPurchase = async (req, res, next) => {
         // Increment stock in stock table per product + warehouse
         const [existingStock] = await connection.query(
           'SELECT id, quantity FROM stock WHERE product_id = ? AND warehouse_id = ? LIMIT 1',
-          [item.product_id, warehouse_id]
+          [targetProductId, warehouse_id]
         );
 
         let prevQty = 0;
@@ -1181,12 +1199,12 @@ export const createPurchase = async (req, res, next) => {
           prevQty = Number(existingStock[0].quantity);
           await connection.query(
             'UPDATE stock SET quantity = quantity + ? WHERE id = ?',
-            [item.quantity, existingStock[0].id]
+            [itemQty, existingStock[0].id]
           );
         } else {
           await connection.query(
             'INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)',
-            [item.product_id, warehouse_id, item.quantity]
+            [targetProductId, warehouse_id, itemQty]
           );
         }
 
@@ -1194,11 +1212,37 @@ export const createPurchase = async (req, res, next) => {
         await connection.query(
           `INSERT INTO stock_logs (product_id, warehouse_id, vendor_id, type, quantity, reference_no, notes, user_id, previous_quantity, new_quantity)
            VALUES (?, ?, ?, 'Stock In', ?, ?, ?, ?, ?, ?)`,
-          [item.product_id, warehouse_id, vendor_id, item.quantity, purchaseNo, 'Purchase Invoice Entry', req.user.id, prevQty, prevQty + item.quantity]
+          [targetProductId, warehouse_id, vendor_id, itemQty, purchaseNo, 'Purchase Invoice Entry', req.user ? req.user.id : 1, prevQty, prevQty + itemQty]
         );
 
+        // Record Purchase Receipt Valuation Layer for Odoo 19 Ledger
+        try {
+          const newQty = prevQty + itemQty;
+          const prevVal = Number((prevQty * itemPurchasePrice).toFixed(2));
+          const newVal = Number((newQty * itemPurchasePrice).toFixed(2));
+
+          await recordValuationLayer(connection, {
+            productId: targetProductId,
+            warehouseId: warehouse_id,
+            batchId: null,
+            transactionType: 'Purchase Receipt',
+            referenceNo: purchaseNo,
+            quantityDelta: itemQty,
+            unitCost: itemPurchasePrice,
+            valueDelta: itemTotal,
+            previousQuantity: prevQty,
+            newQuantity: newQty,
+            previousInventoryValue: prevVal,
+            newInventoryValue: newVal,
+            accountingTreatment: 'Inventory Asset',
+            createdBy: req.user ? req.user.id : 1
+          });
+        } catch (pve) {
+          console.warn('[Purchase Valuation Layer] Warning:', pve.message);
+        }
+
         // Sync FIFO active batch Expiry Date and MRP on Product master
-        await syncProductFifoState(connection, item.product_id);
+        await syncProductFifoState(connection, targetProductId);
       }
     }
 
@@ -1264,7 +1308,7 @@ export const createPurchase = async (req, res, next) => {
           payment_method || 'Cash',
           `INIT-${purchaseNo}`,
           `Initial Payment for ${purchaseNo}`,
-          req.user.id || 1
+          req.user ? req.user.id : 1
         ]
       );
     }
@@ -1309,7 +1353,7 @@ export const createPurchase = async (req, res, next) => {
 
     await connection.commit();
 
-    await logActivity(req.user.id, 'Create Purchase', 'Purchases', `Recorded purchase invoice "${purchaseNo}" (Vendor ID: ${vendor_id})`, req.ip);
+    await logActivity(req.user ? req.user.id : 1, 'Create Purchase', 'Purchases', `Recorded purchase invoice "${purchaseNo}" (Vendor ID: ${vendor_id})`, req.ip);
 
     const [vInfo] = await connection.query('SELECT name FROM vendors WHERE id = ?', [vendor_id]);
     const vendorName = vInfo[0]?.name || 'Unknown Vendor';
@@ -1319,13 +1363,16 @@ export const createPurchase = async (req, res, next) => {
       title: 'New Purchase Recorded',
       message: `Purchase invoice "${purchaseNo}" recorded from supplier "${vendorName}" for total amount ₹${total}.`,
       priority: 'Medium',
-      related_user: req.user.email,
+      related_user: req.user ? req.user.email : 'System',
       related_module: 'Purchases',
       target_roles: 'Admin,Manager,Staff'
     }, connection);
 
     for (const item of items) {
-      await checkStockAlerts(connection, item.product_id, req.user.id);
+      const targetProductId = Number(item.product_id || item.productId);
+      if (targetProductId) {
+        await checkStockAlerts(connection, targetProductId, req.user ? req.user.id : 1);
+      }
     }
 
     return res.status(201).json({
@@ -1549,21 +1596,52 @@ export const createPurchaseOrder = async (req, res, next) => {
     }
     const poNo = `PO-${String(maxSeq + 1).padStart(4, '0')}-${year}`;
 
+    // Calculate total sums dynamically if not provided
+    let calcSubtotal = 0;
+    let calcGst = 0;
+    const itemRecords = [];
+
+    for (const item of items) {
+      const pId = Number(item.product_id || item.productId || 0);
+      if (!pId) continue;
+
+      const itemPrice = (item.purchase_price !== undefined && item.purchase_price !== null && !isNaN(Number(item.purchase_price)))
+        ? Number(item.purchase_price)
+        : ((item.purchasePrice !== undefined && item.purchasePrice !== null && !isNaN(Number(item.purchasePrice)))
+          ? Number(item.purchasePrice)
+          : (item.price !== undefined && item.price !== null && !isNaN(Number(item.price)) ? Number(item.price) : 0));
+
+      const itemQty = Number(item.quantity) || 1;
+      const itemGst = Number(item.gst || 0);
+      const itemBase = itemPrice * itemQty;
+      const itemTax = itemBase * (itemGst / 100);
+      const itemTotal = Number(item.total) || Number((itemBase + itemTax).toFixed(2));
+
+      calcSubtotal += itemBase;
+      calcGst += itemTax;
+
+      itemRecords.push({ pId, itemQty, itemPrice, itemGst, itemTotal });
+    }
+
+    const finalSubtotal = (subtotal !== undefined && subtotal !== null && Number(subtotal) > 0) ? Number(subtotal) : calcSubtotal;
+    const finalGst = (gst_amount !== undefined && gst_amount !== null && Number(gst_amount) >= 0) ? Number(gst_amount) : calcGst;
+    const finalTotal = (total !== undefined && total !== null && Number(total) > 0) ? Number(total) : (finalSubtotal + finalGst);
+
     // Insert PO (including user_id for tracking Prepared By metadata)
     const [result] = await connection.query(
       `INSERT INTO purchase_orders (purchase_order_no, vendor_id, warehouse_id, date, expected_delivery_date, subtotal, discount, gst_amount, total, status, notes, user_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
-      [poNo, vendor_id, warehouse_id, date, expected_delivery_date || null, subtotal || 0, discount || 0, gst_amount || 0, total || 0, notes || null, req.user.id]
+      [poNo, vendor_id, warehouse_id, date, expected_delivery_date || null, finalSubtotal, discount || 0, finalGst, finalTotal, notes || null, req.user.id]
     );
 
     const poId = result.insertId;
 
     // Loop items
-    for (const item of items) {
+    for (const item of itemRecords) {
       await connection.query(
         `INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, received_quantity, purchase_price, gst, total)
          VALUES (?, ?, ?, 0, ?, ?, ?)`,
-        [poId, item.product_id, item.quantity, item.purchase_price, item.gst, item.total]
+        [poId, item.pId, item.itemQty, item.itemPrice, item.itemGst, item.itemTotal]
       );
     }
 
@@ -1712,7 +1790,7 @@ export const createGRN = async (req, res, next) => {
     }
 
     // Fetch PO items
-    const [poItems] = await connection.query('SELECT id, product_id, quantity, received_quantity FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
+    const [poItems] = await connection.query('SELECT id, product_id, quantity, received_quantity, purchase_price, gst, total FROM purchase_order_items WHERE purchase_order_id = ?', [poId]);
 
     // Process items, increment stock, add stock logs, update PO received quantities
     for (const item of items) {
@@ -1776,7 +1854,11 @@ export const createGRN = async (req, res, next) => {
 
         const itemMrp = item.mrp && Number(item.mrp) > 0 ? Number(item.mrp) : (item.max_retail_price && Number(item.max_retail_price) > 0 ? Number(item.max_retail_price) : defaultProdMrp);
         const itemSellingPrice = item.selling_price && Number(item.selling_price) > 0 ? Number(item.selling_price) : defaultProdSellingPrice;
-        const itemPurchasePrice = item.purchase_price && Number(item.purchase_price) > 0 ? Number(item.purchase_price) : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice);
+        const itemPurchasePrice = (item.purchase_price && Number(item.purchase_price) > 0)
+          ? Number(item.purchase_price)
+          : ((poItem && poItem.purchase_price && Number(poItem.purchase_price) > 0)
+            ? Number(poItem.purchase_price)
+            : (item.unit_price && Number(item.unit_price) > 0 ? Number(item.unit_price) : defaultProdPurchasePrice));
 
         // Create dedicated batch record in purchase_batches for FIFO inventory management
         await connection.query(

@@ -7,13 +7,15 @@ import {
   calculateNetProfit,
   calculateStockCounts,
   calculateStockDestroy,
+  calculateStockAdjustments,
   calculateBorrowLedger,
   calculateStockAging,
   calculateInventoryTurnover,
   calculateABCAnalysis,
   calculateReservedStockMetrics,
   calculateBatchValuationReport,
-  validateInventoryConsistency
+  validateInventoryConsistency,
+  getValuationDrillDown
 } from '../services/calculationService.js';
 
 // @desc    Get dashboard metrics / KPIs for tenant
@@ -179,8 +181,8 @@ export const getDashboardCharts = async (req, res, next) => {
     // 5. Stock Movement (Logs aggregated by date last 7 days)
     const [stockMovement] = await req.db.query(`
       SELECT DATE_FORMAT(created_at, '%d %b') as dateLabel,
-             SUM(CASE WHEN type = 'Stock In' THEN quantity ELSE 0 END) as stockIn,
-             SUM(CASE WHEN type = 'Stock Out' THEN ABS(quantity) ELSE 0 END) as stockOut
+             SUM(CASE WHEN type = 'Stock In' OR (type = 'Adjustment' AND quantity > 0) THEN quantity ELSE 0 END) as stockIn,
+             SUM(CASE WHEN type = 'Stock Out' THEN ABS(quantity) WHEN type = 'Adjustment' AND quantity < 0 THEN ABS(quantity) ELSE 0 END) as stockOut
       FROM stock_logs
       WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
       GROUP BY DATE(created_at)
@@ -802,19 +804,35 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
         returnsAmount: Number(returnsRes[0].ret_amt)
       };
     } else {
-      const salesCalc = await calculateTotalSales(db, req.query);
-      const purchCalc = await calculatePurchaseExpenses(db, req.query);
-      const cogsCalc = await calculateCOGS(db, req.query);
-      const invValuation = await calculateInventoryValuation(db, req.query);
-      const stockCounts = await calculateStockCounts(db, req.query);
-      const destroyCalc = await calculateStockDestroy(db, req.query);
-      const borrowCalc = await calculateBorrowLedger(db, req.query);
+      const salesCalc = (await calculateTotalSales(db, req.query)) || {};
+      const purchCalc = (await calculatePurchaseExpenses(db, req.query)) || {};
+      const cogsCalc = Number((await calculateCOGS(db, req.query)) || 0);
+      const invValuation = Number((await calculateInventoryValuation(db, req.query)) || 0);
+      const stockCounts = (await calculateStockCounts(db, req.query)) || {};
+      const destroyCalc = (await calculateStockDestroy(db, req.query)) || {};
+      const borrowCalc = (await calculateBorrowLedger(db, req.query)) || {};
+      const stockAdjustments = (await calculateStockAdjustments(db, req.query)) || {};
 
-      const netProfit = Math.max(0, salesCalc.netSales - cogsCalc - destroyCalc.destroyCost);
-      const marginPct = salesCalc.netSales > 0 ? Number(((netProfit / salesCalc.netSales) * 100).toFixed(2)) : 0;
+      const adjGain = Number(stockAdjustments.adjustmentGain || 0);
+      const adjLoss = Number(stockAdjustments.adjustmentLoss || 0);
+      const destCost = Number(destroyCalc.destroyCost || 0);
+      const netSalesVal = Number(salesCalc.netSales || 0);
+
+      const grossProfitCalc = Number((netSalesVal - cogsCalc).toFixed(2));
+      const grossMarginPct = netSalesVal > 0 ? Number(((grossProfitCalc / netSalesVal) * 100).toFixed(2)) : 0;
+      const netProfit = Math.max(0, netSalesVal - cogsCalc + adjGain - adjLoss - destCost);
+      const marginPct = netSalesVal > 0 ? Number(((netProfit / netSalesVal) * 100).toFixed(2)) : 0;
+
+      const [unitsSoldTotalRes] = await db.query(`
+        SELECT COALESCE(SUM(si.quantity), 0) as total_units_sold
+        FROM sale_items si JOIN sales s ON si.sale_id = s.id
+        ${salesWhere}
+      `, salesParams);
+      const totalUnitsSold = Number(unitsSoldTotalRes[0]?.total_units_sold || 0);
 
       kpis = {
         totalSales: salesCalc.netSales,
+        unitsSold: totalUnitsSold,
         grossSales: salesCalc.grossSales,
         salesCount: salesCalc.salesCount,
         salesReturns: salesCalc.salesReturns,
@@ -830,9 +848,20 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
         totalBorrow: borrowCalc.totalBorrow,
         totalPaid: borrowCalc.totalPaid,
         inventoryValue: invValuation,
+        inventoryAdjustmentGain: stockAdjustments.adjustmentGain,
+        inventoryAdjustmentLoss: stockAdjustments.adjustmentLoss,
+        netInventoryAdjustment: stockAdjustments.netInventoryAdjustment,
+        wastageLoss: stockAdjustments.wastageLoss,
+        increasedQty: stockAdjustments.increasedQty || 0,
+        decreasedQty: stockAdjustments.decreasedQty || 0,
+        netQty: stockAdjustments.netQty || 0,
+        wastageQty: stockAdjustments.wastageQty || 0,
+        adjustmentCount: stockAdjustments.adjustmentCount || 0,
         lowStockCount: stockCounts.lowStockCount,
         outOfStockCount: stockCounts.outOfStockCount,
         cogs: cogsCalc,
+        grossProfit: grossProfitCalc,
+        grossMargin: grossMarginPct,
         profit: netProfit,
         profitMargin: marginPct,
         growth: 0
@@ -857,7 +886,8 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
     // ── 2. PERIOD TRENDS CHART DATA (trends) ──────────────────────────────────
     const [salesTrend] = await db.query(`
       SELECT ${salesLabelExpr} as label, 
-             GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0)) as revenue
+             GREATEST(0, SUM(s.total) - COALESCE((SELECT SUM(sr.refund_amount) FROM sales_returns sr JOIN sales s2 ON sr.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0)) as revenue,
+             COALESCE((SELECT SUM(si.quantity) FROM sale_items si JOIN sales s2 ON si.sale_id = s2.id WHERE DATE(s2.date) = DATE(s.date)), 0) as units_sold
       FROM sales s
       ${salesWhere}
       GROUP BY label
@@ -890,7 +920,14 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
 
     const trendMap = {};
     salesTrend.forEach(row => {
-      trendMap[row.label] = { label: row.label, revenue: Number(row.revenue), expenses: 0, returns: 0, profit: Number(row.revenue) };
+      trendMap[row.label] = { 
+        label: row.label, 
+        revenue: Number(row.revenue), 
+        units_sold: Number(row.units_sold || 0), 
+        expenses: 0, 
+        returns: 0, 
+        profit: Number(row.revenue) 
+      };
     });
 
     purchTrend.forEach(row => {
@@ -898,7 +935,7 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
         trendMap[row.label].expenses = Number(row.expenses);
         trendMap[row.label].profit = Math.max(0, trendMap[row.label].revenue - Number(row.expenses));
       } else {
-        trendMap[row.label] = { label: row.label, revenue: 0, expenses: Number(row.expenses), returns: 0, profit: 0 };
+        trendMap[row.label] = { label: row.label, revenue: 0, units_sold: 0, expenses: Number(row.expenses), returns: 0, profit: 0 };
       }
     });
 
@@ -1060,8 +1097,8 @@ export const getInventorySummary = async (req, res, next) => {
       const [sQty] = await req.db.query(`
         SELECT COALESCE(SUM(total_stock), 0) as total FROM (
           SELECT COALESCE(
-            (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
             SUM(s.quantity),
+            (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
             0
           ) as total_stock
           FROM products p
@@ -1076,8 +1113,8 @@ export const getInventorySummary = async (req, res, next) => {
         SELECT COUNT(*) as count FROM (
           SELECT p.id,
                  COALESCE(
-                   (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                    SUM(s.quantity),
+                   (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                    0
                  ) as total_stock
           FROM products p
@@ -1093,8 +1130,8 @@ export const getInventorySummary = async (req, res, next) => {
         SELECT COUNT(*) as count FROM (
           SELECT p.id,
                  COALESCE(
-                   (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                    SUM(s.quantity),
+                   (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                    0
                  ) as total_stock
           FROM products p
@@ -1208,3 +1245,26 @@ export const getInventoryReconciliationReport = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get Stock Adjustment Financial & Audit Summary Report
+// @route   GET /api/reports/stock-adjustments
+export const getStockAdjustmentReport = async (req, res, next) => {
+  try {
+    const report = await calculateStockAdjustments(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get Inventory Valuation Drill-down / Layers Report (Odoo 19 Ledger)
+// @route   GET /api/reports/valuation-layers
+export const getValuationLayerReport = async (req, res, next) => {
+  try {
+    const report = await getValuationDrillDown(req.db, req.query);
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    next(error);
+  }
+};
+

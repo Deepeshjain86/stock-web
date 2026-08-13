@@ -415,7 +415,7 @@ const Header = ({ onOpenShortcuts }) => {
                 <h1 className="text-base md:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">
                   {greeting}, <span className="text-indigo-600 dark:text-indigo-400">{user?.name?.split(' ')[0] || 'User'}</span>
                 </h1>
-                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-0.5">Manage your Kirana Store Inventory</p>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-0.5">Manage your Stock Management Inventory</p>
               </div>
             </div>
 
@@ -445,7 +445,7 @@ const Header = ({ onOpenShortcuts }) => {
                   }`}
                 >
                   <CreditCardIcon className="w-4 h-4 stroke-[2.5]" />
-                  <span>{user?.subscription_status === 'Expired' ? 'Expired — Upgrade Plan' : 'SaaS Plan'}</span>
+                  <span>{user?.subscription_status === 'Expired' ? 'Expired — Upgrade Plan' : 'Subscription Plan'}</span>
                 </button>
               )}
 
@@ -456,7 +456,7 @@ const Header = ({ onOpenShortcuts }) => {
                 className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-white rounded-xl text-xs font-bold transition-all border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95"
               >
                 <CommandLineIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400 stroke-[2.5]" />
-                <span className="font-mono text-[10px] bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-black">Alt + K</span>
+                <span className="font-mono text-[10px] bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-black">Shortcut Key</span>
               </button>
 
               {/* Theme Toggle */}

@@ -49,8 +49,8 @@ export const getProducts = async (req, res, next) => {
              sc.id as sub_category_id,
              b.id as brand_id,
              COALESCE(
-               (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                SUM(s.quantity),
+               (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                0
              ) as total_stock,
              CASE 
@@ -144,6 +144,38 @@ export const getProducts = async (req, res, next) => {
 
     const [products] = await req.db.query(query, queryParams);
 
+    // Self-healing: Ensure purchase_batches remaining_quantity matches physical stock.quantity
+    for (const p of products) {
+      try {
+        const sQty = Number(p.total_stock || 0);
+        const [bRows] = await req.db.query(
+          'SELECT SUM(remaining_quantity) as bSum FROM purchase_batches WHERE product_id = ?',
+          [p.id]
+        );
+        if (bRows[0]?.bSum !== null && bRows[0]?.bSum !== undefined) {
+          const bSum = Number(bRows[0].bSum);
+          if (Math.abs(sQty - bSum) > 0.001) {
+            let target = sQty;
+            const [batches] = await req.db.query(
+              'SELECT id, purchase_quantity FROM purchase_batches WHERE product_id = ? ORDER BY purchase_date DESC, id DESC',
+              [p.id]
+            );
+            for (const b of batches) {
+              const pQty = Number(b.purchase_quantity || 0);
+              let newRem = 0;
+              if (target > 0) {
+                newRem = Math.min(target, pQty > 0 ? pQty : target);
+                target -= newRem;
+              }
+              await req.db.query('UPDATE purchase_batches SET remaining_quantity = ? WHERE id = ?', [newRem, b.id]);
+            }
+          }
+        }
+      } catch (syncErr) {
+        // Non-blocking self-healing
+      }
+    }
+
     const formattedProducts = products.map((p) => ({
       ...p,
       mrp: Number(p.grn_mrp || p.active_batch_mrp || p.mrp || 0),
@@ -174,8 +206,8 @@ export const getProductById = async (req, res, next) => {
               COALESCE(sc.name, p.sub_category) as sub_category,
               COALESCE(b.name, p.brand) as brand,
               COALESCE(
-                (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                 SUM(s.quantity),
+                (SELECT SUM(remaining_quantity) FROM purchase_batches WHERE product_id = p.id),
                 0
               ) as total_stock,
               CASE 

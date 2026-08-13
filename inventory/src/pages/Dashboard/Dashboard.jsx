@@ -79,24 +79,13 @@ const Dashboard = () => {
     inventoryValuation: 0,
     profit: 0,
     nearExpiry: 0,
+    inventoryAdjustmentGain: 0,
+    inventoryAdjustmentLoss: 0,
+    netInventoryAdjustment: 0,
   });
 
-  const [categoryBreakdownData, setCategoryBreakdownData] = useState([
-    { name: 'Groceries', value: 45, color: '#6366F1' },
-    { name: 'Snacks', value: 25, color: '#F59E0B' },
-    { name: 'Beverages', value: 15, color: '#10B981' },
-    { name: 'Others', value: 15, color: '#3B82F6' },
-  ]);
-
-  const [monthlySalesTrend, setMonthlySalesTrend] = useState([
-    { name: 'Mon', Sales: 12000, Purchases: 8000 },
-    { name: 'Tue', Sales: 19000, Purchases: 11000 },
-    { name: 'Wed', Sales: 17000, Purchases: 9500 },
-    { name: 'Thu', Sales: 24000, Purchases: 14000 },
-    { name: 'Fri', Sales: 22000, Purchases: 13000 },
-    { name: 'Sat', Sales: 30000, Purchases: 18000 },
-    { name: 'Sun', Sales: 40000, Purchases: 22000 },
-  ]);
+  const [categoryBreakdownData, setCategoryBreakdownData] = useState([]);
+  const [monthlySalesTrend, setMonthlySalesTrend] = useState([]);
 
   const fetchDashboardData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -122,6 +111,9 @@ const Dashboard = () => {
           lowStock: kpiRes.kpis.lowStock ?? 0,
           outOfStock: kpiRes.kpis.outOfStock ?? 0,
           nearExpiry: kpiRes.kpis.nearExpiry ?? 0,
+          inventoryAdjustmentGain: kpiRes.kpis.inventoryAdjustmentGain ?? 0,
+          inventoryAdjustmentLoss: kpiRes.kpis.inventoryAdjustmentLoss ?? 0,
+          netInventoryAdjustment: kpiRes.kpis.netInventoryAdjustment ?? 0,
         };
 
         const catDistList = kpiRes.categoryDist || chartRes?.charts?.categoryDist;
@@ -130,8 +122,12 @@ const Dashboard = () => {
           const mappedDist = catDistList
             .filter(c => Number(c.value) > 0)
             .map((c, i) => ({ name: c.name, value: Number(c.value), color: colors[i % colors.length] }));
-          if (mappedDist.length > 0) setCategoryBreakdownData(mappedDist);
+          setCategoryBreakdownData(mappedDist);
+        } else {
+          setCategoryBreakdownData([]);
         }
+      } else {
+        setCategoryBreakdownData([]);
       }
 
       if (alertRes?.success && alertRes.alerts) {
@@ -146,15 +142,19 @@ const Dashboard = () => {
         }
       }
 
-      if (chartRes?.success && chartRes.charts?.monthlyTrends?.length > 0) {
+      if (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends) && chartRes.charts.monthlyTrends.length > 0) {
         setMonthlySalesTrend(chartRes.charts.monthlyTrends);
+      } else {
+        setMonthlySalesTrend([]);
       }
 
       setKpis(updatedKpis);
       setDbOffline(false);
     } catch (error) {
-      console.warn('Dashboard API failed, using fallback data.', error);
+      console.warn('Dashboard API failed', error);
       setDbOffline(true);
+      setCategoryBreakdownData([]);
+      setMonthlySalesTrend([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -202,16 +202,16 @@ const Dashboard = () => {
     );
   }
 
-  // KPI card definitions
+  // KPI card definitions with 100% dynamic values
   const kpiCards = [
     {
       label: "Total Revenue",
       value: `₹${(kpis.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
       icon: CurrencyRupeeIcon,
       iconBg: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-      bar: { color: 'from-indigo-500 to-violet-500', width: '78%' },
-      badge: { text: '▲ 18.6%', color: 'text-emerald-600' },
-      badgeSub: 'vs Last Week',
+      bar: { color: 'from-indigo-500 to-violet-500', width: kpis.totalSales > 0 ? '100%' : '0%' },
+      badge: { text: kpis.totalSales > 0 ? '✓ Net Sales' : '0 Sales Billed', color: kpis.totalSales > 0 ? 'text-emerald-600' : 'text-slate-400' },
+      badgeSub: '',
       onClick: () => navigate('/dashboard/reports'),
     },
     {
@@ -219,8 +219,8 @@ const Dashboard = () => {
       value: `₹${(kpis.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
       icon: ShoppingBagIcon,
       iconBg: 'bg-blue-50 text-blue-600 border-blue-100',
-      bar: { color: 'bg-blue-500', width: '62%' },
-      badge: { text: `${kpis.totalOrders} Orders`, color: 'text-blue-600' },
+      bar: { color: 'bg-blue-500', width: kpis.totalPurchases > 0 ? '100%' : '0%' },
+      badge: { text: `${kpis.totalOrders || 0} Orders`, color: 'text-blue-600' },
       badgeSub: 'total invoices',
       onClick: () => navigate('/dashboard/purchase'),
     },
@@ -229,8 +229,8 @@ const Dashboard = () => {
       value: `${kpis.lowStock} Items`,
       icon: ExclamationTriangleIcon,
       iconBg: 'bg-amber-50 text-amber-600 border-amber-100',
-      bar: { color: 'bg-amber-500', width: `${Math.min(kpis.lowStock * 5, 95)}%` },
-      badge: { text: '⚠ Action Required', color: 'text-amber-600' },
+      bar: { color: 'bg-amber-500', width: `${Math.min(kpis.lowStock * 10, 100)}%` },
+      badge: { text: kpis.lowStock > 0 ? '⚠ Action Required' : '✓ Stock Healthy', color: kpis.lowStock > 0 ? 'text-amber-600' : 'text-emerald-600' },
       badgeSub: '',
       onClick: () => navigate('/dashboard/stock'),
     },
@@ -239,9 +239,9 @@ const Dashboard = () => {
       value: (kpis.totalCustomers || 0).toLocaleString('en-IN'),
       icon: UserGroupIcon,
       iconBg: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-      bar: { color: 'bg-emerald-500', width: '65%' },
-      badge: { text: '▲ 5.4%', color: 'text-emerald-600' },
-      badgeSub: 'this month',
+      bar: { color: 'bg-emerald-500', width: kpis.totalCustomers > 0 ? '100%' : '0%' },
+      badge: { text: kpis.totalCustomers > 0 ? `${kpis.totalCustomers} Registered` : '0 Customers', color: 'text-emerald-600' },
+      badgeSub: '',
       onClick: () => navigate('/dashboard/customers'),
     },
   ];
@@ -348,6 +348,47 @@ const Dashboard = () => {
         })}
       </motion.div>
 
+      {/* ── INVENTORY ADJUSTMENT BREAKDOWN SECTION ── */}
+      <motion.div variants={cardVariants} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 border-b border-slate-100 pb-2.5 gap-2">
+          <div>
+            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Inventory Adjustment Ledger</h3>
+            <p className="text-[10px] text-slate-500 font-medium">Independent stock recount gains &amp; loss variations (Separated from Purchases &amp; Sales)</p>
+          </div>
+          <button onClick={() => navigate('/dashboard/stock-adjustment')} className="text-xs text-indigo-600 hover:text-indigo-800 font-bold self-start sm:self-auto cursor-pointer">
+            View Adjustment Logs →
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3.5 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Adjustment Gain</span>
+              <span className="text-lg font-black text-emerald-800 font-mono">+₹{Number(kpis.inventoryAdjustmentGain || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+            </div>
+            <span className="p-2 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold">Gain</span>
+          </div>
+
+          <div className="bg-rose-50/60 border border-rose-100 rounded-xl p-3.5 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">Adjustment Loss</span>
+              <span className="text-lg font-black text-rose-800 font-mono">-₹{Number(kpis.inventoryAdjustmentLoss || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+            </div>
+            <span className="p-2 bg-rose-100 text-rose-800 rounded-lg text-xs font-bold">Loss</span>
+          </div>
+
+          <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-3.5 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">Net Adjustment</span>
+              <span className={`text-lg font-black font-mono ${kpis.netInventoryAdjustment >= 0 ? 'text-indigo-900' : 'text-rose-700'}`}>
+                {kpis.netInventoryAdjustment >= 0 ? '+' : ''}₹{Number(kpis.netInventoryAdjustment || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <span className="p-2 bg-indigo-100 text-indigo-800 rounded-lg text-xs font-bold">Net</span>
+          </div>
+        </div>
+      </motion.div>
+
       {/* ── CHARTS ROW ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -372,37 +413,47 @@ const Dashboard = () => {
           </div>
           <div className="h-[1px] bg-slate-100 mb-4" />
           <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthlySalesTrend} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366F1" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradPurchases" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} tickLine={false} axisLine={false} tickFormatter={v => `₹${v.toLocaleString('en-IN')}`} />
-                <Tooltip
-                  formatter={(v, n) => [`₹${Number(v).toLocaleString('en-IN')}`, n]}
-                  contentStyle={{
-                    backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
-                    borderColor: isDarkMode ? '#334155' : '#E2E8F0',
-                    color: isDarkMode ? '#F8FAFC' : '#0F172A',
-                    borderRadius: 12,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                  }}
-                />
-                <Area type="monotone" dataKey="Sales" stroke="#6366F1" strokeWidth={2.5} fill="url(#gradSales)" dot={false} />
-                <Area type="monotone" dataKey="Purchases" stroke="#F59E0B" strokeWidth={2.5} fill="url(#gradPurchases)" dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
+            {monthlySalesTrend.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <ChartBarIcon className="w-10 h-10 text-slate-300 mb-2 stroke-1" />
+                <p className="text-sm font-semibold text-slate-600">No Sales or Purchase Data Yet</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                  Record sales bills or purchase invoices to display dynamic performance trends.
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={monthlySalesTrend} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366F1" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradPurchases" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#E2E8F0'} vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: isDarkMode ? '#CBD5E1' : '#334155', fontWeight: 600 }} stroke={isDarkMode ? '#475569' : '#94A3B8'} tickLine={false} axisLine={false} tickFormatter={v => `₹${v.toLocaleString('en-IN')}`} />
+                  <Tooltip
+                    formatter={(v, n) => [`₹${Number(v).toLocaleString('en-IN')}`, n]}
+                    contentStyle={{
+                      backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF',
+                      borderColor: isDarkMode ? '#334155' : '#E2E8F0',
+                      color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                      borderRadius: 12,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    }}
+                  />
+                  <Area type="monotone" dataKey="Sales" stroke="#6366F1" strokeWidth={2.5} fill="url(#gradSales)" dot={false} />
+                  <Area type="monotone" dataKey="Purchases" stroke="#F59E0B" strokeWidth={2.5} fill="url(#gradPurchases)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </motion.div>
 
@@ -417,40 +468,52 @@ const Dashboard = () => {
           </div>
           <div className="h-[1px] bg-slate-100 mb-4" />
 
-          <div className="h-48 relative flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={categoryBreakdownWithPercentages}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={56}
-                  outerRadius={76}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {categoryBreakdownWithPercentages.map((entry, i) => (
-                    <Cell key={`cell-${i}`} fill={entry.color} stroke="none" />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v, n, p) => [`${v} Products (${p.payload.percentage}%)`, 'Volume']} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Top</span>
-              <span className="text-2xl font-bold text-slate-900 leading-none mt-0.5">{topCategoryPct}</span>
+          {categoryBreakdownData.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              <CubeIcon className="w-10 h-10 text-slate-300 mb-2 stroke-1" />
+              <p className="text-sm font-semibold text-slate-600">No Category Data</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                Add products with assigned categories to view stock distribution.
+              </p>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            {categoryBreakdownWithPercentages.map((item) => (
-              <div key={item.name} className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-1.5 rounded-xl">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                <span className="truncate">{item.name}</span>
-                <span className="ml-auto font-bold text-slate-800 flex-shrink-0">{item.percentage}%</span>
+          ) : (
+            <>
+              <div className="h-48 relative flex items-center justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={categoryBreakdownWithPercentages}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={76}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {categoryBreakdownWithPercentages.map((entry, i) => (
+                        <Cell key={`cell-${i}`} fill={entry.color} stroke="none" />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v, n, p) => [`${v} Products (${p.payload.percentage}%)`, 'Volume']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Top</span>
+                  <span className="text-2xl font-bold text-slate-900 leading-none mt-0.5">{topCategoryPct}</span>
+                </div>
               </div>
-            ))}
-          </div>
+
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                {categoryBreakdownWithPercentages.map((item) => (
+                  <div key={item.name} className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-100 px-2.5 py-1.5 rounded-xl">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                    <span className="truncate">{item.name}</span>
+                    <span className="ml-auto font-bold text-slate-800 flex-shrink-0">{item.percentage}%</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </motion.div>
       </div>
 

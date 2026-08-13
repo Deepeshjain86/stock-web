@@ -159,8 +159,12 @@ const ProductList = () => {
       fetchProductsAndCategories();
     };
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('stock-changed', handleFocus);
+    window.addEventListener('inventory-updated', handleFocus);
     return () => {
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('stock-changed', handleFocus);
+      window.removeEventListener('inventory-updated', handleFocus);
     };
   }, []);
 

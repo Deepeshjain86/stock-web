@@ -40,26 +40,19 @@ const PurchaseManagerDashboard = () => {
   });
 
   const [alerts, setAlerts] = useState([]);
-  const [purchaseTrend, setPurchaseTrend] = useState([
-    { day: 'Mon', Purchases: 15000, GRN: 12000 },
-    { day: 'Tue', Purchases: 22000, GRN: 18000 },
-    { day: 'Wed', Purchases: 18000, GRN: 16000 },
-    { day: 'Thu', Purchases: 29000, GRN: 24000 },
-    { day: 'Fri', Purchases: 35000, GRN: 31000 },
-    { day: 'Sat', Purchases: 42000, GRN: 38000 },
-    { day: 'Sun', Purchases: 25000, GRN: 21000 },
-  ]);
+  const [purchaseTrend, setPurchaseTrend] = useState([]);
 
   const loadPurchaseData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
     try {
-      const [kpiRes, alertRes, purchaseRes, vendorRes] = await Promise.all([
+      const [kpiRes, alertRes, purchaseRes, vendorRes, chartRes] = await Promise.all([
         reportsAPI.getKPIs().catch(() => null),
         stockAPI.getAlerts().catch(() => null),
         purchasesAPI.getAll().catch(() => null),
-        vendorsAPI.getAll().catch(() => null)
+        vendorsAPI.getAll().catch(() => null),
+        reportsAPI.getCharts().catch(() => null)
       ]);
 
       if (kpiRes?.success && kpiRes.kpis) {
@@ -89,6 +82,17 @@ const PurchaseManagerDashboard = () => {
 
       if (vendorRes?.success && vendorRes.vendors) {
         setKpis(prev => ({ ...prev, totalVendors: vendorRes.vendors.length }));
+      }
+
+      if (chartRes?.success && Array.isArray(chartRes.charts?.monthlyTrends) && chartRes.charts.monthlyTrends.length > 0) {
+        const trends = chartRes.charts.monthlyTrends.map(t => ({
+          day: t.name,
+          Purchases: t.Purchases || 0,
+          GRN: t.Purchases || 0
+        }));
+        setPurchaseTrend(trends);
+      } else {
+        setPurchaseTrend([]);
       }
     } catch (err) {
       console.error('Purchase Dashboard fetch error:', err);
@@ -207,20 +211,30 @@ const PurchaseManagerDashboard = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">Procurement & GRN Trend</h3>
-              <p className="text-xs text-slate-500">Weekly breakdown of purchases vs warehouse inward receipts</p>
+              <p className="text-xs text-slate-500">Breakdown of purchases vs warehouse inward receipts</p>
             </div>
           </div>
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={purchaseTrend}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis dataKey="day" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip />
-                <Bar dataKey="Purchases" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="GRN" fill="#0d9488" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {purchaseTrend.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+                <TruckIcon className="w-10 h-10 text-slate-300 dark:text-slate-600 mb-2 stroke-1" />
+                <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">No Procurement Trend Data</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-xs">
+                  Record purchase GRN receipts to track procurement trends over time.
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={purchaseTrend}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis dataKey="day" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip />
+                  <Bar dataKey="Purchases" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="GRN" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -280,7 +294,7 @@ const PurchaseManagerDashboard = () => {
           </div>
         </button>
 
-        <button onClick={() => navigate('/dashboard/reports')} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-emerald-500 hover:shadow-md transition-all">
+        <button onClick={() => navigate('/dashboard/reports')} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-purple-500 hover:shadow-md transition-all">
           <div className="rounded-xl bg-purple-100 dark:bg-purple-950/50 p-3 text-purple-600">
             <ClipboardDocumentCheckIcon className="h-6 w-6" />
           </div>

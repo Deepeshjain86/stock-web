@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { masterPool, getTenantPool, ensureTenantMigrations } from '../config/tenantDb.js';
 import { createNotification } from '../services/notificationService.js';
 import { provisionTenantDatabase } from '../services/tenantProvisioner.js';
+import { validateEmailField } from '../utils/validators.js';
 
 // Helper to generate JWT token
 const generateToken = (id, email, role, tenantId, tenantDbName) => {
@@ -347,6 +348,11 @@ export const login = async (req, res, next) => {
 export const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
+
+    const emailErr = validateEmailField(email, true);
+    if (emailErr) {
+      return res.status(400).json({ success: false, message: emailErr });
+    }
 
     const [users] = await masterPool.query('SELECT id, role FROM users WHERE email = ?', [email]);
     if (users.length === 0) {

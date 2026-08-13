@@ -10,24 +10,40 @@ const API = axios.create({
   },
 });
 
-// Request Interceptor: Inject JWT token from localStorage
+// Request Interceptor: Inject JWT token & x-tenant-id header from localStorage
 API.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    // Inject dynamic tenant routing context if Super Admin is monitoring a store
+    // Inject dynamic tenant routing context if present
     const monitoredTenant = localStorage.getItem('monitoredTenant');
+    let tenantIdToInject = null;
+
     if (monitoredTenant) {
       try {
         const tenantData = JSON.parse(monitoredTenant);
         if (tenantData && tenantData.id) {
-          config.headers['x-tenant-id'] = tenantData.id;
+          tenantIdToInject = tenantData.id;
         }
-      } catch (e) {
-        console.error('Failed to parse monitored tenant details', e);
+      } catch (e) {}
+    }
+
+    if (!tenantIdToInject) {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        try {
+          const userData = JSON.parse(userStr);
+          if (userData && (userData.tenant_id || userData.tenantId)) {
+            tenantIdToInject = userData.tenant_id || userData.tenantId;
+          }
+        } catch (e) {}
       }
+    }
+
+    if (tenantIdToInject) {
+      config.headers['x-tenant-id'] = tenantIdToInject;
     }
     return config;
   },
@@ -208,12 +224,24 @@ export const stockAPI = {
     const response = await API.get('/stock/logs', { params });
     return response.data;
   },
+  getAdjustments: async (params) => {
+    const response = await API.get('/stock/adjustments', { params });
+    return response.data;
+  },
   getAlerts: async () => {
     const response = await API.get('/stock/alerts');
     return response.data;
   },
   adjust: async (data) => {
     const response = await API.post('/stock/adjust', data);
+    return response.data;
+  },
+  reverseAdjustment: async (id, data) => {
+    const response = await API.post(`/stock/adjust/${id}/reverse`, data);
+    return response.data;
+  },
+  revalue: async (data) => {
+    const response = await API.post('/stock/revaluation', data);
     return response.data;
   },
   transfer: async (data) => {
@@ -236,8 +264,16 @@ export const stockDestroyAPI = {
     const response = await API.post('/stock/destroy/create', data);
     return response.data;
   },
+  confirm: async (id) => {
+    const response = await API.post(`/stock/destroy/${id}/confirm`);
+    return response.data;
+  },
   cancel: async (id, data) => {
     const response = await API.post(`/stock/destroy/${id}/cancel`, data);
+    return response.data;
+  },
+  getBatches: async (productId) => {
+    const response = await API.get(`/stock/product-batches/${productId}`);
     return response.data;
   },
 };
@@ -501,6 +537,14 @@ export const reportsAPI = {
   },
   getPurchaseReport: async (params) => {
     const response = await API.get('/reports/purchases', { params });
+    return response.data;
+  },
+  getStockAdjustmentReport: async (params) => {
+    const response = await API.get('/reports/stock-adjustments', { params });
+    return response.data;
+  },
+  getValuationLayers: async (params) => {
+    const response = await API.get('/reports/valuation-layers', { params });
     return response.data;
   },
 };

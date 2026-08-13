@@ -71,6 +71,7 @@ const Reports = () => {
     { id: 'inventory', label: 'Inventory Valuation' },
     { id: 'sales', label: 'Sales & GST Report' },
     { id: 'purchase', label: 'Purchases & Expenses' },
+    { id: 'adjustments', label: '⚡ Stock Adjustments & Reconciliation' },
     { id: 'lowstock', label: 'Low Stock Report' },
     { id: 'analytics', label: '📊 Graphical Analytics' }
   ];
@@ -206,6 +207,13 @@ const Reports = () => {
       } else if (activeTab === 'purchase') {
         const res = await reportsAPI.getPurchaseReport(params);
         if (res.success) setDataList(res.report);
+      } else if (activeTab === 'adjustments') {
+        const res = await stockAPI.getAdjustments(params);
+        if (res.success && Array.isArray(res.adjustments)) {
+          setDataList(res.adjustments);
+        } else {
+          setDataList([]);
+        }
       } else if (activeTab === 'lowstock') {
         const res = await stockAPI.getAlerts();
         if (res.success && res.alerts && Array.isArray(res.alerts.lowStock)) {
@@ -240,6 +248,15 @@ const Reports = () => {
 
   useEffect(() => {
     fetchReportData();
+    const handleEventUpdate = () => {
+      fetchReportData();
+    };
+    window.addEventListener('stock-changed', handleEventUpdate);
+    window.addEventListener('inventory-updated', handleEventUpdate);
+    return () => {
+      window.removeEventListener('stock-changed', handleEventUpdate);
+      window.removeEventListener('inventory-updated', handleEventUpdate);
+    };
   }, [activeTab]);
 
   // Trigger load when analytics filters change
@@ -441,6 +458,33 @@ const Reports = () => {
             </button>
           )
         }
+      ];
+    }
+    if (activeTab === 'adjustments') {
+      return [
+        { key: 'adjustment_no', label: 'Adjustment No.' },
+        { key: 'created_at', label: 'Date & Time', render: (val) => val ? new Date(val).toLocaleString() : 'N/A' },
+        { key: 'product_name', label: 'Product Description', render: (val, row) => val || row.name || 'N/A' },
+        { key: 'adjustment_type', label: 'Adjustment Type', render: (val) => (
+          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${val === 'Increase' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+            {val === 'Increase' ? '▲ Increase (+)' : '▼ Decrease (-)'}
+          </span>
+        )},
+        { key: 'quantity', label: 'Quantity', render: (val, row) => (
+          <span className={`font-mono font-bold ${row.adjustment_type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+            {row.adjustment_type === 'Increase' ? '+' : '-'}{Math.abs(Number(val))}
+          </span>
+        )},
+        { key: 'unit_cost', label: 'Unit Cost', render: (val) => `₹${Number(val || 0).toFixed(2)}` },
+        { key: 'adjustment_value', label: 'Valuation Impact', render: (val, row) => (
+          <span className={`font-mono font-black ${row.adjustment_type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+            {row.adjustment_type === 'Increase' ? '+' : '-'}₹{Number(val || 0).toFixed(2)}
+          </span>
+        )},
+        { key: 'reason', label: 'Reason' },
+        { key: 'remarks', label: 'Remarks / Notes' },
+        { key: 'user_name', label: 'Adjusted By', render: (val, row) => val || row.user_id || 'System' },
+        { key: 'status', label: 'Status', render: (val) => <StatusBadge status={val || 'Completed'} /> }
       ];
     }
     if (activeTab === 'lowstock') {
@@ -730,7 +774,7 @@ const Reports = () => {
                       <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Sales (Net)</h4>
                       <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">₹{Number(analyticsData.kpis?.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                       <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
-                        <span>{analyticsData.kpis?.salesCount || 0} Bills Settled</span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{(analyticsData.kpis?.unitsSold || 0).toLocaleString()} Packets/Units Sold ({analyticsData.kpis?.salesCount || 0} Bills)</span>
                         {Number(analyticsData.kpis?.salesReturns || 0) > 0 && (
                           <span className="text-rose-500 font-bold">Returns Refunded: -₹{Number(analyticsData.kpis?.salesReturns).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         )}
@@ -745,11 +789,11 @@ const Reports = () => {
                       </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
-                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Net Profit & Margin</h4>
-                      <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">₹{Number(analyticsData.kpis?.profit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                      <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">Gross Profit &amp; Trading Margin</h4>
+                      <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">₹{Number(analyticsData.kpis?.grossProfit ?? (Number(analyticsData.kpis?.totalSales || 0) - Number(analyticsData.kpis?.cogs || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                       <div className="text-[10px] font-bold text-indigo-500 dark:text-indigo-300 mt-1 flex flex-col gap-0.5">
                         <span>Sales (₹{Number(analyticsData.kpis?.totalSales || 0).toLocaleString('en-IN')}) - COGS (₹{Number(analyticsData.kpis?.cogs || 0).toLocaleString('en-IN')})</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">Net Margin: {analyticsData.kpis?.profitMargin || 0}%</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">Gross Margin: {analyticsData.kpis?.grossMargin ?? (analyticsData.kpis?.totalSales > 0 ? Number((((analyticsData.kpis?.totalSales - analyticsData.kpis?.cogs) / analyticsData.kpis?.totalSales) * 100).toFixed(2)) : 0)}%</span>
                       </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
@@ -824,6 +868,108 @@ const Reports = () => {
                 </div>
               )}
 
+              {/* ── STOCK ADJUSTMENT & RECONCILIATION CALCULATION DIV ── */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse"></span>
+                      <h3 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                        Inventory Stock Adjustment & Reconciliation Ledger
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                      Recount &amp; Audit variations — Stock Increase (+ Gains), Decrease (- Losses), &amp; Wastage tracked separately from Sales &amp; Purchases
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('adjustments')}
+                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 self-start sm:self-auto cursor-pointer"
+                  >
+                    View Complete Adjustment Logs →
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                  {/* Stock Increase Adjustment */}
+                  <div className="bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
+                        Stock Increase (Adjustment)
+                      </span>
+                      <span className="text-xl font-black text-emerald-800 dark:text-emerald-300 font-mono mt-1 block">
+                        +₹{Number(analyticsData.kpis?.inventoryAdjustmentGain || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-1 block">
+                        +{analyticsData.kpis?.increasedQty || 0} Pcs Physical Stock Added
+                      </span>
+                    </div>
+                    <span className="p-2 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-lg text-xs font-bold">
+                      Increase
+                    </span>
+                  </div>
+
+                  {/* Stock Decrease Adjustment */}
+                  <div className="bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-rose-700 dark:text-rose-400 uppercase tracking-wider block">
+                        Stock Decrease (Adjustment)
+                      </span>
+                      <span className="text-xl font-black text-rose-800 dark:text-rose-300 font-mono mt-1 block">
+                        -₹{Number(analyticsData.kpis?.inventoryAdjustmentLoss || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold mt-1 block">
+                        -{analyticsData.kpis?.decreasedQty || 0} Pcs Physical Stock Deducted
+                      </span>
+                    </div>
+                    <span className="p-2 bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 rounded-lg text-xs font-bold">
+                      Loss
+                    </span>
+                  </div>
+
+                  {/* Net Adjustment */}
+                  <div className="bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">
+                        Net Adjustment Impact
+                      </span>
+                      <span className={`text-xl font-black font-mono mt-1 block ${
+                        Number(analyticsData.kpis?.netInventoryAdjustment || 0) >= 0
+                          ? 'text-indigo-900 dark:text-indigo-300'
+                          : 'text-rose-700 dark:text-rose-300'
+                      }`}>
+                        {Number(analyticsData.kpis?.netInventoryAdjustment || 0) >= 0 ? '+' : ''}
+                        ₹{Number(analyticsData.kpis?.netInventoryAdjustment || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold mt-1 block">
+                        {Number(analyticsData.kpis?.netQty || 0) >= 0 ? '+' : ''}{analyticsData.kpis?.netQty || 0} Pcs Net Variation
+                      </span>
+                    </div>
+                    <span className="p-2 bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 rounded-lg text-xs font-bold">
+                      Net
+                    </span>
+                  </div>
+
+                  {/* Wastage & Damage Loss */}
+                  <div className="bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">
+                        Wastage &amp; Damage Loss
+                      </span>
+                      <span className="text-xl font-black text-amber-800 dark:text-amber-300 font-mono mt-1 block">
+                        -₹{Number(analyticsData.kpis?.wastageLoss || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold mt-1 block">
+                        -{analyticsData.kpis?.wastageQty || 0} Pcs Damaged / Expired
+                      </span>
+                    </div>
+                    <span className="p-2 bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 rounded-lg text-xs font-bold">
+                      Wastage
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               {/* CHARTS CONTAINER LAYOUT */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print:grid-cols-1">
                 
@@ -874,10 +1020,11 @@ const Reports = () => {
                               fontWeight: '600',
                               boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
                             }}
-                            formatter={(value) => `₹${Number(value).toLocaleString('en-IN')}`}
+                            formatter={(value, name) => name && name.includes('Units') ? `${Number(value)} Pcs` : `₹${Number(value).toLocaleString('en-IN')}`}
                           />
                           <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: isDarkMode ? '#CBD5E1' : '#334155' }} />
                           <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
+                          <Area type="monotone" dataKey="units_sold" name="Units Sold (Packets)" stroke="#8b5cf6" strokeWidth={2} fillOpacity={0.15} fill="#8b5cf6" />
                           {analyticsScope === 'overall' && (
                             <>
                               <Area type="monotone" dataKey="expenses" name="Purchase Cost" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />

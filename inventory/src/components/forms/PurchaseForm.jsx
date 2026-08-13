@@ -150,7 +150,7 @@ const PurchaseForm = ({ purchase, purchaseOrder, onSubmit, onCancel }) => {
 
     const rawPrice = customPrice !== '' ? parseFloat(customPrice) : product.purchasePrice;
     const finalPrice = isNaN(rawPrice) || rawPrice <= 0 ? 0 : rawPrice;
-    const qty = Math.max(1, parseInt(quantity) || 1);
+    const qty = Math.max(0.001, parseFloat(quantity) || 1);
     const disc = parseFloat(itemDiscount) || 0;
     const gstP = parseFloat(itemGst) || 0;
 

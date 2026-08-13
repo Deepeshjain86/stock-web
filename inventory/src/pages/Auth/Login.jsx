@@ -11,6 +11,7 @@ import {
 import { useAppDispatch } from '../../store/hooks';
 import { loginUser } from '../../store/slices/authSlice';
 import ThemeToggle from '../../components/common/ThemeToggle';
+import { isValidEmail, INVALID_EMAIL_MESSAGE } from '../../utils/validators';
 
 const Login = () => {
   const dispatch = useAppDispatch();
@@ -31,6 +32,11 @@ const Login = () => {
     e.preventDefault();
     if (!email || !password) {
       setError('Please enter your email/ID and security password');
+      return;
+    }
+
+    if (email.includes('@') && !isValidEmail(email)) {
+      setError(INVALID_EMAIL_MESSAGE);
       return;
     }
 

@@ -17,6 +17,7 @@ import { usersAPI } from '../../services/api';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 import Modal from '../../components/common/Modal';
+import { validateEmailField } from '../../utils/validators';
 
 import StatsCard from '../../components/common/StatsCard';
 
@@ -312,10 +313,9 @@ const StaffList = () => {
     if (!formData.name?.trim()) {
       newErrors.name = 'Full Name is required';
     }
-    if (!formData.email?.trim()) {
-      newErrors.email = 'Email Address is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
-      newErrors.email = 'Please enter a valid email address';
+    const emailErr = validateEmailField(formData.email, true);
+    if (emailErr) {
+      newErrors.email = emailErr;
     }
 
     if (!selectedUser && (!formData.password || formData.password.length < 6)) {

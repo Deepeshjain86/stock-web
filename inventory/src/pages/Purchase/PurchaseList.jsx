@@ -117,10 +117,11 @@ const PurchaseList = () => {
   const handleSubmit = async (formData) => {
     try {
       const itemsMapped = formData.items.map(item => ({
-        product_id: item.productId || 1,
+        product_id: Number(item.productId || item.product_id),
         quantity: Number(item.quantity) || 1,
-        purchase_price: Number(item.price) || 0,
-        gst: Number(item.gstPercent) || 0,
+        purchase_price: Number(item.price ?? item.purchase_price ?? item.purchasePrice ?? 0),
+        mrp: Number(item.mrp) || 0,
+        gst: Number(item.gstPercent ?? item.gst ?? 0),
         total: Number(item.total) || 0
       }));
 

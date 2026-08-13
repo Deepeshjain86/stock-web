@@ -109,17 +109,18 @@ const PurchaseOrderList = () => {
 
   const handleCreateInvoice = async (data) => {
     try {
-      const itemsMapped = data.items.map(item => ({
-        product_id: Number(item.productId),
+      const itemsMapped = (data.items || []).map(item => ({
+        product_id: Number(item.productId || item.product_id || item.id),
         quantity: Number(item.quantity) || 1,
-        purchase_price: Number(item.price) || 0,
-        gst: Number(item.gstPercent) || 0,
+        purchase_price: Number(item.price ?? item.purchase_price ?? item.purchasePrice ?? 0),
+        mrp: Number(item.mrp) || 0,
+        gst: Number(item.gstPercent ?? item.gst ?? 0),
         total: Number(item.total) || 0
       }));
 
       const payload = {
-        vendor_id: Number(data.vendorId),
-        warehouse_id: Number(data.warehouseId),
+        vendor_id: Number(data.vendorId || selectedPO?.vendor_id || selectedPO?.vendorId || 1),
+        warehouse_id: Number(data.warehouseId || selectedPO?.warehouse_id || selectedPO?.warehouseId || 1),
         date: data.purchaseDate || new Date().toISOString().split('T')[0],
         subtotal: Number(data.subtotal) || 0,
         discount: Number(data.discountAmount) || 0,
@@ -128,20 +129,23 @@ const PurchaseOrderList = () => {
         payment_status: data.paymentStatus || 'Pending',
         delivery_status: data.deliveryStatus || 'Received',
         payment_method: data.paymentMode || 'Cash',
-        purchase_order_id: selectedPO.id,
+        purchase_order_id: selectedPO?.id || null,
         items: itemsMapped
       };
 
       const res = await purchasesAPI.create(payload);
       if (res.success) {
-        // Also update PO status to Completed if fully invoiced
-        await purchaseOrdersAPI.updateStatus(selectedPO.id, { status: 'Completed' });
+        if (selectedPO?.id) {
+          await purchaseOrdersAPI.updateStatus(selectedPO.id, { status: 'Completed' });
+        }
+        toast.success('Purchase invoice created successfully!');
         setShowInvoiceForm(false);
         setSelectedPO(null);
         fetchPurchaseOrders();
       }
     } catch (err) {
       console.error(err);
+      toast.error(err.response?.data?.message || 'Error creating purchase invoice');
     }
   };
 

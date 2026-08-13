@@ -22,6 +22,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { toggleTheme } from '../../store/slices/themeSlice';
 import Loader from '../../components/common/Loader';
 import ThemeToggle from '../../components/common/ThemeToggle';
+import { validateEmailField } from '../../utils/validators';
 
 const StoreManagement = () => {
   const navigate = useNavigate();
@@ -169,7 +170,8 @@ const StoreManagement = () => {
     // Client-side validation — show inline errors, never close form
     if (!form.store_name.trim()) { setFormError('Store Name is required.'); return; }
     if (!form.owner_name.trim()) { setFormError('Owner Full Name is required.'); return; }
-    if (!form.email.trim()) { setFormError('Owner Email is required.'); return; }
+    const emailErr = validateEmailField(form.email, true);
+    if (emailErr) { setFormError(emailErr); return; }
     if (form.phone && form.phone.replace(/\D/g, '').length !== 10) { setFormError('Mobile / Phone number must be exactly 10 digits.'); return; }
     if (!selectedStore && !form.admin_id.trim()) { setFormError('Admin ID is required.'); return; }
     if (!selectedStore && !form.password.trim()) { setFormError('Admin Password is required.'); return; }
@@ -218,8 +220,14 @@ const StoreManagement = () => {
       });
       if (res.success) {
         alert(res.message || 'Subscription override successful');
-        setShowSubModal(false);
-        loadStores();
+        const storesRes = await superAdminAPI.getStores();
+        if (storesRes.success) {
+          setStores(storesRes.stores);
+          const updatedActive = storesRes.stores.find(s => s.id === activeStoreForSub.id);
+          if (updatedActive) {
+            setActiveStoreForSub(updatedActive);
+          }
+        }
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Override operation failed');

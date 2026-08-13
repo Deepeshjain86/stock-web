@@ -2,6 +2,7 @@ import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
 import { syncProductFifoState } from '../utils/fifoQueueHelper.js';
 import { formatDateToYYYYMMDD } from '../utils/dateFormatter.js';
+import { recordValuationLayer } from '../services/valuationLayerService.js';
 
 // @desc    Get all sales invoices for authenticated tenant
 // @route   GET /api/sales
@@ -520,6 +521,33 @@ export const createSale = async (req, res, next) => {
       }
 
       const newStockTotal = Math.max(0, prevStockTotal - qtyNeeded);
+
+      // Record Sales Delivery Valuation Layer for Odoo 19 Ledger
+      try {
+        const [[costProd]] = await connection.query('SELECT purchase_price FROM products WHERE id = ?', [pId]);
+        const unitCostBasis = Number(batchRows && batchRows.length > 0 && Number(batchRows[0].purchase_price) > 0 ? batchRows[0].purchase_price : (costProd?.purchase_price || 0));
+        const prevVal = Number((prevStockTotal * unitCostBasis).toFixed(2));
+        const newVal = Number((newStockTotal * unitCostBasis).toFixed(2));
+
+        await recordValuationLayer(connection, {
+          productId: pId,
+          warehouseId: Number(warehouseId),
+          batchId: batchRows && batchRows.length > 0 ? batchRows[0].id : null,
+          transactionType: 'Sales Delivery',
+          referenceNo: invoiceNo,
+          quantityDelta: -qtyNeeded,
+          unitCost: unitCostBasis,
+          valueDelta: Number((-qtyNeeded * unitCostBasis).toFixed(2)),
+          previousQuantity: prevStockTotal,
+          newQuantity: newStockTotal,
+          previousInventoryValue: prevVal,
+          newInventoryValue: newVal,
+          accountingTreatment: 'COGS',
+          createdBy: req.user?.id || 1
+        });
+      } catch (ve) {
+        console.warn('[Sales Valuation Layer] Warning:', ve.message);
+      }
 
       // Log stock movement
       await connection.query(

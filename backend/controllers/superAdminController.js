@@ -4,6 +4,7 @@ import { masterPool, getTenantPool } from '../config/tenantDb.js';
 import { provisionTenantDatabase } from '../services/tenantProvisioner.js';
 import { createNotification } from '../services/notificationService.js';
 import { runFullBackup, listBackups } from '../services/backupService.js';
+import { validateEmailField } from '../utils/validators.js';
 
 // Helper for logger fallback since activity logs table exists on both master and tenant DBs
 const logMasterActivity = async (userId, action, module, details, ip) => {
@@ -248,6 +249,11 @@ export const createStore = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Required fields: Store Name, Owner Name, Email, and Password' });
     }
 
+    const emailErr = validateEmailField(email, true);
+    if (emailErr) {
+      return res.status(400).json({ success: false, message: emailErr, field: 'email' });
+    }
+
     // Auto-generate / format Admin ID in UPPERCASE with auto-incrementing sequence (e.g. AMAN001, AMAN002)
     let basePrefix = 'ADMIN';
     if (admin_id && String(admin_id).trim()) {
@@ -398,22 +404,37 @@ export const createStore = async (req, res, next) => {
 // @route   PUT /api/superadmin/stores/:id
 // @access  Private (Super Admin only)
 // Helper to synchronize store subscription status and user status across Master DB and isolated Tenant DB
-export const syncTenantStoreAndUserStatus = async (tenantId, newSubscriptionStatus) => {
+export const syncTenantStoreAndUserStatus = async (tenantId, newSubscriptionStatus, newPlan = null, newExpiry = null, conn = null) => {
   try {
     const isStoreActive = newSubscriptionStatus === 'Active' || newSubscriptionStatus === 'Trial';
     const targetUserStatus = isStoreActive ? 'Active' : 'Suspended';
+    const dbClient = conn || masterPool;
 
-    // 1. Update masterPool tenants table
-    await masterPool.query('UPDATE tenants SET subscription_status = ? WHERE id = ?', [newSubscriptionStatus, tenantId]);
+    // 1. Update masterPool tenants table status, plan, and expiry
+    let query = 'UPDATE tenants SET subscription_status = ?';
+    const params = [newSubscriptionStatus];
+
+    if (newPlan) {
+      query += ', subscription_plan = ?';
+      params.push(newPlan);
+    }
+    if (newExpiry) {
+      query += ', subscription_expires_at = ?';
+      params.push(newExpiry);
+    }
+    query += ' WHERE id = ?';
+    params.push(tenantId);
+
+    await dbClient.query(query, params);
 
     // 2. Update masterPool users table for all non-superadmin users under this tenant
-    await masterPool.query(
+    await dbClient.query(
       'UPDATE users SET status = ? WHERE tenant_id = ? AND role != "Super Admin"',
       [targetUserStatus, tenantId]
     );
 
     // 3. Update isolated tenant DB users table
-    const [tenants] = await masterPool.query('SELECT database_name FROM tenants WHERE id = ?', [tenantId]);
+    const [tenants] = await dbClient.query('SELECT database_name FROM tenants WHERE id = ?', [tenantId]);
     if (tenants.length > 0 && tenants[0].database_name) {
       const dbName = tenants[0].database_name;
       try {
@@ -668,7 +689,7 @@ export const handleSubscriptionAction = async (req, res, next) => {
     }
 
     // Synchronize tenant store & user status across Master DB and Tenant DB
-    await syncTenantStoreAndUserStatus(id, newStatus);
+    await syncTenantStoreAndUserStatus(id, newStatus, newPlan, newExpiry, masterConn);
 
     // Log action to subscription logs
     await masterConn.query(

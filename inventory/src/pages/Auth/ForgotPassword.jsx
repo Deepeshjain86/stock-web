@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { EnvelopeIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { authAPI } from '../../services/api';
+import { validateEmailField } from '../../utils/validators';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
@@ -14,7 +15,11 @@ const ForgotPassword = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email) return;
+    const emailErr = validateEmailField(email, true);
+    if (emailErr) {
+      setError(emailErr);
+      return;
+    }
 
     setLoading(true);
     setError('');

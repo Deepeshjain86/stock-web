@@ -20,18 +20,26 @@ import Modal from '../../components/common/Modal';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import StatsCard from '../../components/common/StatsCard';
 
-const REASONS = [
-  'Physical Stock Count',
-  'Damaged Product',
-  'Expired Product',
-  'Stock Missing',
-  'Theft/Loss',
-  'Manual Correction',
-  'Supplier Correction',
-  'Customer Return Correction',
-  'Opening Stock Correction',
+const INCREASE_REASONS = [
+  'Physical Count Difference',
+  'Opening Correction',
+  'Previous Entry Correction',
+  'Found Stock',
   'Other'
 ];
+
+const DECREASE_REASONS = [
+  'Damaged',
+  'Expired',
+  'Lost',
+  'Theft',
+  'Wastage',
+  'Physical Count Difference',
+  'System Correction',
+  'Other'
+];
+
+const ALL_REASONS = Array.from(new Set([...INCREASE_REASONS, ...DECREASE_REASONS]));
 
 const StockAdjustment = ({ onStockChanged }) => {
   const { user } = useAppSelector((state) => state.auth);
@@ -57,7 +65,7 @@ const StockAdjustment = ({ onStockChanged }) => {
     unit: 'Pieces',
     type: 'Increase', // Increase or Decrease
     quantity: '',
-    reason: 'Physical Stock Count',
+    reason: 'Physical Count Difference',
     remarks: '',
     batchNo: '',
     mfgDate: '',
@@ -74,13 +82,14 @@ const StockAdjustment = ({ onStockChanged }) => {
 
   // UI Interactive States
   const [selectedLogForView, setSelectedLogForView] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null });
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [reversalConfirm, setReversalConfirm] = useState({ open: false, id: null, adjustmentNo: '' });
   const [toastAlert, setToastAlert] = useState({ show: false, message: '', type: 'success' });
 
   // Helper to parse notes structured string
   const parseNotes = (notesStr) => {
     const details = {
-      reason: 'Physical Stock Count',
+      reason: 'Physical Count Difference',
       remarks: '—',
       batchNo: 'N/A',
       mfgDate: 'N/A',
@@ -111,9 +120,12 @@ const StockAdjustment = ({ onStockChanged }) => {
         setProductList(prodRes.products);
       }
       
-      const logsRes = await stockAPI.getLogs({ type: 'Adjustment' });
-      if (logsRes.success) {
-        setRecords(logsRes.logs);
+      const adjRes = await stockAPI.getAdjustments();
+      if (adjRes.success) {
+        setRecords(adjRes.adjustments);
+      } else {
+        const logsRes = await stockAPI.getLogs({ type: 'Adjustment' });
+        if (logsRes.success) setRecords(logsRes.logs);
       }
     } catch (err) {
       console.error('StockAdjustment API error:', err);
@@ -205,13 +217,32 @@ const StockAdjustment = ({ onStockChanged }) => {
   // Handle Input Changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === 'type') {
+      const defaultReason = value === 'Increase' ? INCREASE_REASONS[0] : DECREASE_REASONS[0];
+      setFormData((prev) => ({ ...prev, type: value, reason: defaultReason }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
   };
+
+  // Unit Cost & Adjustment Value Calculation
+  const unitCost = useMemo(() => {
+    if (formData.unitCost !== undefined && formData.unitCost !== '') {
+      return parseFloat(formData.unitCost) || 0;
+    }
+    if (!selectedProductDetails) return 0;
+    return Number(selectedProductDetails.purchase_price || selectedProductDetails.purchasePrice || selectedProductDetails.selling_price || selectedProductDetails.mrp || 0);
+  }, [formData.unitCost, selectedProductDetails]);
+
+  const calculatedAdjustmentValue = useMemo(() => {
+    const qty = parseFloat(formData.quantity) || 0;
+    return Number((qty * unitCost).toFixed(2));
+  }, [formData.quantity, unitCost]);
 
   // Updated Stock Quantity Calculation
   const calculatedUpdatedStock = useMemo(() => {
     const current = selectedProductDetails ? Number(selectedProductDetails.stock || selectedProductDetails.total_stock || 0) : 0;
-    const qty = parseInt(formData.quantity) || 0;
+    const qty = parseFloat(formData.quantity) || 0;
     if (formData.type === 'Increase') {
       return current + qty;
     } else if (formData.type === 'Decrease') {
@@ -220,8 +251,8 @@ const StockAdjustment = ({ onStockChanged }) => {
     return current;
   }, [selectedProductDetails, formData.quantity, formData.type]);
 
-  // Submit Handler (Transaction Wrapped)
-  const handleSubmit = async (e) => {
+  // Submit Handler: Triggers Pre-Confirmation Modal
+  const handleSubmit = (e) => {
     e.preventDefault();
     
     if (!formData.productId) {
@@ -245,19 +276,24 @@ const StockAdjustment = ({ onStockChanged }) => {
       return;
     }
 
+    // Open Pre-Confirmation Modal
+    setShowConfirmModal(true);
+  };
+
+  // Execute Adjustment Transaction
+  const executeSubmitAdjustment = async () => {
+    setShowConfirmModal(false);
     setSubmitting(true);
     try {
-      const typeVal = formData.type === 'Increase' ? 'add' : 'subtract';
-      // Format notes structured string to save tracking parameters inside single transaction
-      const notesDetails = `Reason: ${formData.reason} | Remarks: ${formData.remarks || 'None'} | Batch: ${formData.batchNo || 'N/A'} | Mfg: ${formData.mfgDate || 'N/A'} | Exp: ${formData.expDate || 'N/A'}`;
-
+      const qty = Number(formData.quantity);
       const payload = {
         product_id: Number(formData.productId),
         warehouse_id: 1,
-        type: typeVal,
+        type: formData.type,
         quantity: qty,
+        unit_cost: unitCost,
         reason: formData.reason,
-        notes: notesDetails,
+        remarks: formData.remarks,
         batch_number: formData.batchNo || null,
         mfg_date: formData.mfgDate || null,
         exp_date: formData.expDate || null
@@ -266,35 +302,13 @@ const StockAdjustment = ({ onStockChanged }) => {
       if (!dbOffline) {
         const res = await stockAPI.adjust(payload);
         if (res.success) {
-          triggerToast('Stock adjusted successfully!', 'success');
+          triggerToast(`Stock adjustment ${res.adjustment_no || ''} recorded successfully!`, 'success');
           resetForm();
           await fetchProductsAndLogs();
-          // Notify parent to refresh the stock summary table
           if (onStockChanged) onStockChanged();
         }
       } else {
-        // Simulated Offline Transaction
-        const matchedProd = productList.find(p => p.id === Number(formData.productId));
-        const previousQty = current;
-        const newQty = formData.type === 'Increase' ? previousQty + qty : Math.max(0, previousQty - qty);
-
-        const newRecord = {
-          id: records.length + 1001,
-          created_at: new Date().toISOString(),
-          product_name: matchedProd ? matchedProd.name : 'Unknown Product',
-          category_name: matchedProd ? matchedProd.category : 'General',
-          type: typeVal,
-          quantity: formData.type === 'Increase' ? qty : -qty,
-          previous_quantity: previousQty,
-          new_quantity: newQty,
-          notes: notesDetails,
-          user_name: user?.name || 'Store Manager'
-        };
-
-        // Update product stock in local memory
-        setProductList(prev => prev.map(p => p.id === Number(formData.productId) ? { ...p, stock: newQty } : p));
-        setRecords([newRecord, ...records]);
-        triggerToast('Stock adjustment simulated successfully!', 'success');
+        triggerToast('Stock adjustment simulated successfully in offline mode!', 'success');
         resetForm();
       }
     } catch (err) {
@@ -312,7 +326,7 @@ const StockAdjustment = ({ onStockChanged }) => {
       unit: 'Pieces',
       type: 'Increase',
       quantity: '',
-      reason: 'Physical Stock Count',
+      reason: INCREASE_REASONS[0],
       remarks: '',
       batchNo: '',
       mfgDate: '',
@@ -322,18 +336,35 @@ const StockAdjustment = ({ onStockChanged }) => {
     setSelectedProductDetails(null);
   };
 
-  const handleDeleteRecord = (id) => {
-    if (!isSuperAdmin) {
-      triggerToast('Permission Denied: Only Super Admin can delete stock logs', 'error');
+  const handleTriggerReversal = (record) => {
+    if (isReadOnly) {
+      triggerToast('Monitoring Mode: Reversal disabled', 'error');
       return;
     }
-    setDeleteConfirm({ open: true, id });
+    setReversalConfirm({
+      open: true,
+      id: record.id,
+      adjustmentNo: record.adjustment_no || `ADJ-${String(record.id).padStart(6, '0')}`
+    });
   };
 
-  const executeDeleteRecord = () => {
-    setRecords(records.filter(r => r.id !== deleteConfirm.id));
-    setDeleteConfirm({ open: false, id: null });
-    triggerToast('Adjustment record voided successfully', 'success');
+  const executeReversal = async () => {
+    const { id } = reversalConfirm;
+    setReversalConfirm({ open: false, id: null, adjustmentNo: '' });
+    setSubmitting(true);
+    try {
+      const res = await stockAPI.reverseAdjustment(id, { reason: 'Controlled Reversal' });
+      if (res.success) {
+        triggerToast(res.message || 'Stock adjustment reversed successfully!', 'success');
+        await fetchProductsAndLogs();
+        if (onStockChanged) onStockChanged();
+      }
+    } catch (err) {
+      console.error(err);
+      triggerToast(err.response?.data?.message || 'Failed to reverse stock adjustment', 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Printable receipt layout generator
@@ -753,7 +784,7 @@ const StockAdjustment = ({ onStockChanged }) => {
                     onChange={handleInputChange}
                     className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50 dark:bg-slate-955 font-bold text-slate-900 dark:text-white"
                   >
-                    {REASONS.map(r => (
+                    {(formData.type === 'Increase' ? INCREASE_REASONS : DECREASE_REASONS).map(r => (
                       <option key={r} value={r}>{r}</option>
                     ))}
                   </select>
@@ -766,6 +797,33 @@ const StockAdjustment = ({ onStockChanged }) => {
                     readOnly 
                     className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 font-mono font-black"
                   />
+                </div>
+              </div>
+
+              {/* Unit Cost & Financial Effect Preview */}
+              <div className="grid grid-cols-2 gap-3 bg-indigo-50/50 dark:bg-slate-950 p-3 rounded-xl border border-indigo-100 dark:border-slate-800">
+                <div>
+                  <label className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">
+                    Unit Cost Basis (₹)
+                  </label>
+                  <input
+                    type="number"
+                    name="unitCost"
+                    step="0.01"
+                    min="0"
+                    value={formData.unitCost !== undefined ? formData.unitCost : (unitCost ? unitCost : '')}
+                    onChange={handleInputChange}
+                    placeholder="e.g. 50.00"
+                    className="w-full px-2 py-1 text-xs border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:border-indigo-500 bg-white dark:bg-slate-900 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <span className="block text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">
+                    Valuation Impact (₹)
+                  </span>
+                  <span className={`text-xs font-mono font-black block pt-1 ${formData.type === 'Increase' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                    {formData.type === 'Increase' ? '+' : '-'}₹{calculatedAdjustmentValue.toFixed(2)}
+                  </span>
                 </div>
               </div>
 
@@ -913,7 +971,7 @@ const StockAdjustment = ({ onStockChanged }) => {
                   className="w-full px-2 py-1.5 text-[11px] border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-white"
                 >
                   <option value="">All Reasons</option>
-                  {REASONS.map(r => (
+                  {ALL_REASONS.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
@@ -1027,16 +1085,16 @@ const StockAdjustment = ({ onStockChanged }) => {
                             >
                               <PrinterIcon className="w-3.5 h-3.5" />
                             </button>
-                            {isSuperAdmin && (
+                             {r.status !== 'Reversed' && (
                               <button 
                                 type="button"
-                                onClick={() => handleDeleteRecord(r.id)}
-                                className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg cursor-pointer border border-rose-250"
-                                title="Void Adjustment"
+                                onClick={() => handleTriggerReversal(r)}
+                                className="p-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg cursor-pointer border border-amber-200"
+                                title="Reverse Adjustment"
                               >
-                                <TrashIcon className="w-3.5 h-3.5" />
+                                ↺
                               </button>
-                            )}
+                             )}
                           </div>
                         </td>
                       </tr>
@@ -1074,7 +1132,7 @@ const StockAdjustment = ({ onStockChanged }) => {
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-slate-400 font-mono">Date: {new Date(selectedLogForView.created_at).toLocaleString('en-IN')}</span>
-                  <span className="block text-[10px] font-black text-indigo-650 uppercase">Adjustment ADJ-{String(selectedLogForView.id).padStart(6, '0')}</span>
+                  <span className="block text-[10px] font-black text-indigo-650 uppercase">Adjustment {selectedLogForView.adjustment_no || `ADJ-${String(selectedLogForView.id).padStart(6, '0')}`}</span>
                 </div>
               </div>
 
@@ -1089,16 +1147,22 @@ const StockAdjustment = ({ onStockChanged }) => {
 
                 <div className="bg-slate-50 dark:bg-slate-955 p-4 border border-slate-105 dark:border-slate-800 rounded-xl space-y-1.5">
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Adjustment Action</span>
-                  <p>Type: <span className="text-slate-900 dark:text-white font-bold">{selectedLogForView.quantity >= 0 ? 'Increase (+)' : 'Decrease (-)'}</span></p>
+                  <p>Type: <span className="text-slate-900 dark:text-white font-bold">{selectedLogForView.adjustment_type || (selectedLogForView.quantity >= 0 ? 'Increase (+)' : 'Decrease (-)')}</span></p>
                   <p>Adjusted Qty: <span className="text-slate-900 dark:text-white font-bold">{Math.abs(selectedLogForView.quantity)} Pcs</span></p>
                   <p>Stock Range: <span className="font-mono text-slate-600 dark:text-slate-400">Previous: {selectedLogForView.previous_quantity ?? '—'} → New: {selectedLogForView.new_quantity ?? '—'}</span></p>
+                  {selectedLogForView.unit_cost && (
+                    <p>Unit Cost: <span className="font-mono font-bold text-slate-900 dark:text-white">₹{Number(selectedLogForView.unit_cost).toFixed(2)}</span></p>
+                  )}
+                  {selectedLogForView.adjustment_value && (
+                    <p>Financial Impact: <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">₹{Number(selectedLogForView.adjustment_value).toFixed(2)} ({selectedLogForView.financial_impact || 'Gain'})</span></p>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2 bg-slate-50 dark:bg-slate-950 p-4 border border-slate-100 dark:border-slate-800 rounded-xl">
                 <div>
                   <span className="block text-[9px] text-slate-400 font-bold uppercase mb-0.5">Batch Number</span>
-                  <span className="font-mono text-slate-900 dark:text-white font-bold">{details.batchNo}</span>
+                  <span className="font-mono text-slate-900 dark:text-white font-bold">{selectedLogForView.batch_number || details.batchNo}</span>
                 </div>
                 <div>
                   <span className="block text-[9px] text-slate-400 font-bold uppercase mb-0.5">Manufacturing Date</span>
@@ -1112,8 +1176,8 @@ const StockAdjustment = ({ onStockChanged }) => {
 
               <div className="bg-slate-50 dark:bg-slate-950 border border-slate-150 p-3 rounded-xl space-y-1">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Reason & Remarks:</span>
-                <p className="text-slate-900 dark:text-white font-bold">Reason: {details.reason}</p>
-                <p className="text-slate-700 dark:text-slate-350 font-medium">Remarks: {details.remarks}</p>
+                <p className="text-slate-900 dark:text-white font-bold">Reason: {selectedLogForView.reason || details.reason}</p>
+                <p className="text-slate-700 dark:text-slate-350 font-medium">Remarks: {selectedLogForView.remarks || details.remarks}</p>
               </div>
 
               <div className="flex justify-end gap-2 border-t border-slate-150 pt-4">
@@ -1137,16 +1201,96 @@ const StockAdjustment = ({ onStockChanged }) => {
         })()}
       </Modal>
 
-      {/* DELETE CONFIRM DIALOG */}
+      {/* PRE-CONFIRMATION MODAL */}
+      <Modal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        title="Confirm Stock Adjustment Transaction"
+        size="md"
+      >
+        <div className="space-y-4 text-xs font-semibold text-slate-700 dark:text-slate-300">
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-amber-800 dark:text-amber-300 text-[11px] font-bold">
+            ⚠️ Please review the adjustment breakdown before committing to the database.
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
+            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Product:</span>
+              <span className="font-bold text-slate-900 dark:text-white">{selectedProductDetails?.name}</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Adjustment Type:</span>
+              <span className={`font-black ${formData.type === 'Increase' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formData.type === 'Increase' ? 'Increase (+)' : 'Decrease (-)'}
+              </span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Stock Level Impact:</span>
+              <span className="font-mono font-bold">
+                Current: {selectedProductDetails ? (selectedProductDetails.stock ?? selectedProductDetails.total_stock ?? 0) : 0} Pcs 
+                {' → '} 
+                <span className="text-slate-900 dark:text-white font-black">{calculatedUpdatedStock} Pcs</span>
+              </span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Unit Cost Basis:</span>
+              <span className="font-mono font-bold text-slate-900 dark:text-white">₹{unitCost.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Adjustment Total Value:</span>
+              <span className="font-mono font-black text-indigo-600 dark:text-indigo-400 text-sm">₹{calculatedAdjustmentValue.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Reason:</span>
+              <span className="font-bold text-amber-700 dark:text-amber-400">{formData.reason}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400 uppercase font-bold text-[10px]">Financial Impact:</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                formData.type === 'Increase' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+              }`}>
+                {formData.type === 'Increase' ? 'Inventory Adjustment / Variation (+₹' + calculatedAdjustmentValue.toFixed(2) + ')' : 'Inventory Adjustment / Loss (-₹' + calculatedAdjustmentValue.toFixed(2) + ')'}
+              </span>
+            </div>
+          </div>
+
+          {formData.remarks && (
+            <div className="p-3 bg-slate-100 dark:bg-slate-900 rounded-xl text-slate-600 dark:text-slate-400 text-xs">
+              <span className="font-bold text-slate-700 dark:text-slate-300 block mb-0.5">Remarks:</span>
+              {formData.remarks}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setShowConfirmModal(false)}
+              className="px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-300 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={executeSubmitAdjustment}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer"
+            >
+              {submitting ? 'Committing...' : 'Confirm Adjustment'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* REVERSAL CONFIRM DIALOG */}
       <ConfirmDialog
-        isOpen={deleteConfirm.open}
-        title="Void Stock Adjustment"
-        message="Are you sure you want to void this stock adjustment record? This will remove the audit trail log from the history display ledger."
-        confirmLabel="Void Adjustment"
+        isOpen={reversalConfirm.open}
+        title={`Reverse Stock Adjustment — ${reversalConfirm.adjustmentNo}`}
+        message={`Are you sure you want to reverse this stock adjustment (${reversalConfirm.adjustmentNo})? This will execute an atomic database transaction to restore stock and batch quantities while preserving audit trail history.`}
+        confirmLabel="Execute Reversal"
         cancelLabel="Cancel"
         type="danger"
-        onConfirm={executeDeleteRecord}
-        onCancel={() => setDeleteConfirm({ open: false, id: null })}
+        onConfirm={executeReversal}
+        onCancel={() => setReversalConfirm({ open: false, id: null, adjustmentNo: '' })}
       />
 
     </div>

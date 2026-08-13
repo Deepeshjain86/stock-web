@@ -201,6 +201,18 @@ const Sidebar = () => {
   const monitoredTenant = localStorage.getItem('monitoredTenant');
   useEffect(() => {
     if (user && isExpanded) dispatch(fetchInventorySummary());
+
+    const handleRefreshSummary = () => {
+      if (user) {
+        dispatch(fetchInventorySummary());
+      }
+    };
+    window.addEventListener('stock-changed', handleRefreshSummary);
+    window.addEventListener('inventory-updated', handleRefreshSummary);
+    return () => {
+      window.removeEventListener('stock-changed', handleRefreshSummary);
+      window.removeEventListener('inventory-updated', handleRefreshSummary);
+    };
   }, [dispatch, user, isExpanded, monitoredTenant]);
 
   /* ── Handlers ── */

@@ -1,5 +1,6 @@
 import { logActivity } from '../utils/activityLogger.js';
 import { createNotification } from '../services/notificationService.js';
+import { validateEmailField } from '../utils/validators.js';
 
 
 // @desc    Get all vendors with summary totals
@@ -141,7 +142,11 @@ export const createVendor = async (req, res, next) => {
       }
     }
 
-    if (email) {
+    if (email && String(email).trim() !== '') {
+      const emailErr = validateEmailField(email, false);
+      if (emailErr) {
+        return res.status(400).json({ success: false, message: emailErr, field: 'email' });
+      }
       const [dupEmail] = await req.db.query('SELECT id FROM vendors WHERE email = ?', [email]);
       if (dupEmail.length > 0) {
         return res.status(400).json({ success: false, message: `A supplier with email address "${email}" already exists.`, field: 'email' });
@@ -271,6 +276,17 @@ export const updateVendor = async (req, res, next) => {
       const [dupGstin] = await req.db.query('SELECT id FROM vendors WHERE gstin = ? AND id != ?', [gstin, id]);
       if (dupGstin.length > 0) {
         return res.status(400).json({ success: false, message: `Another supplier with GSTIN "${gstin}" already exists.`, field: 'gstin' });
+      }
+    }
+
+    if (email && String(email).trim() !== '') {
+      const emailErr = validateEmailField(email, false);
+      if (emailErr) {
+        return res.status(400).json({ success: false, message: emailErr, field: 'email' });
+      }
+      const [dupEmail] = await req.db.query('SELECT id FROM vendors WHERE email = ? AND id != ?', [email, id]);
+      if (dupEmail.length > 0) {
+        return res.status(400).json({ success: false, message: `Another supplier with email address "${email}" already exists.`, field: 'email' });
       }
     }
 
