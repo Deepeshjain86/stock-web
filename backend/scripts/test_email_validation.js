@@ -17,7 +17,17 @@ const invalidEmails = [
   'admin.@gmail.com',
   'admin@gmail..com',
   'user@123domain.com',
-  'test@.org'
+  'test@.org',
+  'ddd12gmail.com',
+  'ddd12@',
+  'ddd12@@gmail.com',
+  'ddd..12@gmail.com',
+  '.ddd@gmail.com',
+  'ddd.@gmail.com',
+  'ddd@.gmail.com',
+  'ddd@gmail..com',
+  '+user@gmail.com',
+  'user+@gmail.com',
 ];
 
 const validEmails = [
@@ -26,7 +36,12 @@ const validEmails = [
   'ayyan@kiranaerp.com',
   'support@my-store.co.in',
   'john.doe@company.org',
-  'user_123@domain.net'
+  'user_123@domain.net',
+  'user+test@gmail.com',
+  'john_doe@gmail.com',
+  'user123@outlook.com',
+  'firstname.lastname@company.co.in',
+  'ddd12@gmil.com',
 ];
 
 let passed = true;

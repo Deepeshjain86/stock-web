@@ -142,6 +142,9 @@ const PurchaseOrderList = () => {
         setShowInvoiceForm(false);
         setSelectedPO(null);
         fetchPurchaseOrders();
+        // Notify Dashboard that purchase/inventory data changed
+        window.dispatchEvent(new CustomEvent('inventory-updated'));
+        window.dispatchEvent(new CustomEvent('stock-changed'));
       }
     } catch (err) {
       console.error(err);

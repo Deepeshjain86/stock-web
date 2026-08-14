@@ -353,6 +353,9 @@ const SalesList = () => {
           // Immediately refresh stock views so Stock Management page shows updated quantities
           dispatch(fetchStockSummary());
           dispatch(fetchStockAlerts());
+          // Notify Dashboard and other pages that sales data changed
+          window.dispatchEvent(new CustomEvent('sales-updated'));
+          window.dispatchEvent(new CustomEvent('inventory-updated'));
         }
       } else {
         // Fallback simulation

@@ -104,6 +104,15 @@ const PurchaseManagerDashboard = () => {
 
   useEffect(() => {
     loadPurchaseData();
+    const handleEventUpdate = () => {
+      loadPurchaseData(true);
+    };
+    window.addEventListener('stock-changed', handleEventUpdate);
+    window.addEventListener('inventory-updated', handleEventUpdate);
+    return () => {
+      window.removeEventListener('stock-changed', handleEventUpdate);
+      window.removeEventListener('inventory-updated', handleEventUpdate);
+    };
   }, []);
 
   if (loading) {

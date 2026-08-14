@@ -317,6 +317,9 @@ const SalesReturn = () => {
         dispatch(fetchProducts());
         dispatch(fetchInventorySummary());
         dispatch(fetchSales());
+        // Notify Dashboard that sales/returns data changed
+        window.dispatchEvent(new CustomEvent('sales-updated'));
+        window.dispatchEvent(new CustomEvent('inventory-updated'));
 
         // Fetch full return voucher details to display print modal
         if (res.returnId) {

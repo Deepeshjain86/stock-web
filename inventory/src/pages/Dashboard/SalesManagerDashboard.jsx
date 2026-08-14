@@ -99,6 +99,17 @@ const SalesManagerDashboard = () => {
 
   useEffect(() => {
     loadSalesData();
+    const handleEventUpdate = () => {
+      loadSalesData(true);
+    };
+    window.addEventListener('stock-changed', handleEventUpdate);
+    window.addEventListener('inventory-updated', handleEventUpdate);
+    window.addEventListener('sales-updated', handleEventUpdate);
+    return () => {
+      window.removeEventListener('stock-changed', handleEventUpdate);
+      window.removeEventListener('inventory-updated', handleEventUpdate);
+      window.removeEventListener('sales-updated', handleEventUpdate);
+    };
   }, []);
 
   if (loading) {

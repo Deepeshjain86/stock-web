@@ -110,6 +110,17 @@ const Reports = () => {
       return { start: startDate, end: endDate, compStart: null, compEnd: null };
     }
 
+    if (datePreset === 'all' || datePreset === 'alltime') {
+      return { start: null, end: null, compStart: null, compEnd: null };
+    }
+
+    const formatDate = (d) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
     const end = new Date();
     let start = new Date();
     let compStart = new Date();
@@ -137,10 +148,10 @@ const Reports = () => {
     }
 
     return {
-      start: start.toISOString().split('T')[0],
-      end: end.toISOString().split('T')[0],
-      compStart: compStart.toISOString().split('T')[0],
-      compEnd: compEnd.toISOString().split('T')[0]
+      start: formatDate(start),
+      end: formatDate(end),
+      compStart: formatDate(compStart),
+      compEnd: formatDate(compEnd)
     };
   };
 
@@ -168,10 +179,10 @@ const Reports = () => {
         params.compareEndDate = dates.compEnd;
       }
       const response = await API.get('/reports/advanced-analytics', { params });
- 
-       if (response.data.success) {
-         setAnalyticsData(response.data);
-       }
+
+      if (response.data.success) {
+        setAnalyticsData(response.data);
+      }
     } catch (err) {
       console.error('Failed to load advanced analytics reports:', err);
     } finally {
@@ -257,7 +268,7 @@ const Reports = () => {
       window.removeEventListener('stock-changed', handleEventUpdate);
       window.removeEventListener('inventory-updated', handleEventUpdate);
     };
-  }, [activeTab]);
+  }, [activeTab, datePreset, startDate, endDate, selectedCategory, selectedBrand, selectedVendor, selectedCustomer, selectedEmployee]);
 
   // Trigger load when analytics filters change
   useEffect(() => {
@@ -785,7 +796,9 @@ const Reports = () => {
                       <p className="text-lg font-black text-slate-900 dark:text-white mt-1">₹{Number(analyticsData.kpis?.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                       <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 flex flex-col gap-0.5">
                         <span>Subtotal (Excl. Tax): ₹{Number(analyticsData.kpis?.netPurchaseSubtotalExclTax || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        <span className="text-indigo-600 dark:text-indigo-400 font-bold">GST Tax: +₹{Number(analyticsData.kpis?.purchaseGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Returns: -₹{Number(analyticsData.kpis?.vendorReturns || 0).toLocaleString('en-IN')}</span>
+                        <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                          GST Tax: +₹{Number(analyticsData.kpis?.purchaseGst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Returns: -₹{Number(analyticsData.kpis?.vendorReturns || 0).toLocaleString('en-IN')} | Transfers: ₹{Number(analyticsData.kpis?.totalStockTransferredValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
                       </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">

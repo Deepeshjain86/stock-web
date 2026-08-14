@@ -45,14 +45,14 @@ const formatWhereClause = (tablePrefix = 's', filters = {}) => {
   if (bVal && bVal !== 'all') {
     const bId = bVal;
     if (tablePrefix === 's') {
-      whereClauses.push(`EXISTS (SELECT 1 FROM sale_items si_b JOIN products pr_b ON si_b.product_id = pr_b.id WHERE si_b.sale_id = s.id AND pr_b.brand = ?)`);
-      params.push(bId);
+      whereClauses.push(`EXISTS (SELECT 1 FROM sale_items si_b JOIN products pr_b ON si_b.product_id = pr_b.id WHERE si_b.sale_id = s.id AND (pr_b.brand = ? OR pr_b.brand_id = ?))`);
+      params.push(bId, bId);
     } else if (tablePrefix === 'p') {
-      whereClauses.push(`EXISTS (SELECT 1 FROM purchase_items pi_b JOIN products pr_b ON pi_b.product_id = pr_b.id WHERE pi_b.purchase_id = p.id AND pr_b.brand = ?)`);
-      params.push(bId);
+      whereClauses.push(`EXISTS (SELECT 1 FROM purchase_items pi_b JOIN products pr_b ON pi_b.product_id = pr_b.id WHERE pi_b.purchase_id = p.id AND (pr_b.brand = ? OR pr_b.brand_id = ?))`);
+      params.push(bId, bId);
     } else if (tablePrefix === 'products' || tablePrefix === 'pr_catalog') {
-      whereClauses.push(`${tablePrefix}.brand = ?`);
-      params.push(bId);
+      whereClauses.push(`(${tablePrefix}.brand = ? OR ${tablePrefix}.brand_id = ?)`);
+      params.push(bId, bId);
     }
   }
 
@@ -106,13 +106,14 @@ export const calculateInventoryValuation = async (db, filters = {}) => {
     WHERE pb.remaining_quantity > 0
   `;
   const batchParams = [];
+  const bVal = filters.brandId || filters.brand;
   if (filters.categoryId && filters.categoryId !== 'all') {
     batchQuery += ` AND p.category_id = ?`;
     batchParams.push(Number(filters.categoryId));
   }
-  if (filters.brandId && filters.brandId !== 'all') {
-    batchQuery += ` AND p.brand_id = ?`;
-    batchParams.push(Number(filters.brandId));
+  if (bVal && bVal !== 'all') {
+    batchQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
+    batchParams.push(bVal, isNaN(Number(bVal)) ? 0 : Number(bVal));
   }
   if (filters.warehouseId && filters.warehouseId !== 'all') {
     batchQuery += ` AND pb.warehouse_id = ?`;
@@ -135,9 +136,9 @@ export const calculateInventoryValuation = async (db, filters = {}) => {
     fallbackQuery += ` AND p.category_id = ?`;
     fallbackParams.push(Number(filters.categoryId));
   }
-  if (filters.brandId && filters.brandId !== 'all') {
-    fallbackQuery += ` AND p.brand_id = ?`;
-    fallbackParams.push(Number(filters.brandId));
+  if (bVal && bVal !== 'all') {
+    fallbackQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
+    fallbackParams.push(bVal, isNaN(Number(bVal)) ? 0 : Number(bVal));
   }
   if (filters.warehouseId && filters.warehouseId !== 'all') {
     fallbackQuery += ` AND s.warehouse_id = ?`;
@@ -287,13 +288,14 @@ export const calculateCOGS = async (db, filters = {}) => {
   const { clause: cogsClause, params: cogsParams } = formatWhereClause('s', filters);
   cogsQuery += cogsClause;
 
+  const bValCogs = filters.brandId || filters.brand;
   if (filters.categoryId && filters.categoryId !== 'all') {
     cogsQuery += ` AND p.category_id = ?`;
     cogsParams.push(Number(filters.categoryId));
   }
-  if (filters.brandId && filters.brandId !== 'all') {
-    cogsQuery += ` AND p.brand_id = ?`;
-    cogsParams.push(Number(filters.brandId));
+  if (bValCogs && bValCogs !== 'all') {
+    cogsQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
+    cogsParams.push(bValCogs, isNaN(Number(bValCogs)) ? 0 : Number(bValCogs));
   }
 
   const [cogsRows] = await db.query(cogsQuery, cogsParams);
@@ -347,9 +349,14 @@ export const calculateStockCounts = async (db, filters = {}) => {
     lowStockQuery += ` AND p.category_id = ?`;
     params.push(Number(filters.categoryId));
   }
-  if (filters.brandId && filters.brandId !== 'all') {
-    lowStockQuery += ` AND p.brand_id = ?`;
-    params.push(Number(filters.brandId));
+  const bValStock = filters.brandId || filters.brand;
+  if (filters.categoryId && filters.categoryId !== 'all') {
+    lowStockQuery += ` AND p.category_id = ?`;
+    params.push(Number(filters.categoryId));
+  }
+  if (bValStock && bValStock !== 'all') {
+    lowStockQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
+    params.push(bValStock, isNaN(Number(bValStock)) ? 0 : Number(bValStock));
   }
   lowStockQuery += `
       GROUP BY p.id, p.min_stock
@@ -371,9 +378,9 @@ export const calculateStockCounts = async (db, filters = {}) => {
     outStockQuery += ` AND p.category_id = ?`;
     outParams.push(Number(filters.categoryId));
   }
-  if (filters.brandId && filters.brandId !== 'all') {
-    outStockQuery += ` AND p.brand_id = ?`;
-    outParams.push(Number(filters.brandId));
+  if (bValStock && bValStock !== 'all') {
+    outStockQuery += ` AND (p.brand = ? OR p.brand_id = ?)`;
+    outParams.push(bValStock, isNaN(Number(bValStock)) ? 0 : Number(bValStock));
   }
   outStockQuery += `
       GROUP BY p.id

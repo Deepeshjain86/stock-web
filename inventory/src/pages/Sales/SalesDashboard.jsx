@@ -143,12 +143,13 @@ const SalesDashboard = () => {
     else setRefreshing(true);
 
     try {
+      const params = getFilterParams();
       const response = await API.get('/reports/sales-dashboard', { params });
 
       if (response.data.success) {
         setKpis(response.data.kpis);
         setCharts(response.data.charts);
-        
+
         // Auto-scale trend chart label based on dateRange selection
         if (dateRange === 'today') setTrendScale('daily');
         else if (dateRange === '7days') setTrendScale('daily');
@@ -169,6 +170,17 @@ const SalesDashboard = () => {
 
   useEffect(() => {
     fetchDashboardData();
+    const handleEventUpdate = () => {
+      fetchDashboardData(true);
+    };
+    window.addEventListener('stock-changed', handleEventUpdate);
+    window.addEventListener('inventory-updated', handleEventUpdate);
+    window.addEventListener('sales-updated', handleEventUpdate);
+    return () => {
+      window.removeEventListener('stock-changed', handleEventUpdate);
+      window.removeEventListener('inventory-updated', handleEventUpdate);
+      window.removeEventListener('sales-updated', handleEventUpdate);
+    };
   }, [dateRange, startDate, endDate, selectedEmployee, selectedCustomer, selectedProduct, selectedPaymentStatus]);
 
   // Export filtered transactions to CSV

@@ -84,6 +84,8 @@ const Dashboard = () => {
     netInventoryAdjustment: 0,
   });
 
+  const [todayKpis, setTodayKpis] = useState({ totalSales: 0, totalOrders: 0, profit: 0 });
+
   const [categoryBreakdownData, setCategoryBreakdownData] = useState([]);
   const [monthlySalesTrend, setMonthlySalesTrend] = useState([]);
 
@@ -91,11 +93,20 @@ const Dashboard = () => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
+    const todayStr = (() => {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    })();
+
     try {
-      const [kpiRes, alertRes, chartRes] = await Promise.all([
+      const [kpiRes, alertRes, chartRes, todayKpiRes] = await Promise.all([
         reportsAPI.getKPIs(),
         stockAPI.getAlerts(),
         reportsAPI.getCharts().catch(() => null),
+        reportsAPI.getKPIs({ startDate: todayStr, endDate: todayStr }).catch(() => null),
       ]);
 
       let updatedKpis = { ...kpis };
@@ -148,6 +159,15 @@ const Dashboard = () => {
         setMonthlySalesTrend([]);
       }
 
+      // Update Today's Store Summary KPIs
+      if (todayKpiRes?.success && todayKpiRes.kpis) {
+        setTodayKpis({
+          totalSales: todayKpiRes.kpis.totalSales ?? 0,
+          totalOrders: todayKpiRes.kpis.totalOrders ?? 0,
+          profit: todayKpiRes.kpis.profit ?? 0,
+        });
+      }
+
       setKpis(updatedKpis);
       setDbOffline(false);
     } catch (error) {
@@ -163,6 +183,24 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchDashboardData();
+    const handleEventUpdate = () => {
+      fetchDashboardData(true);
+    };
+    window.addEventListener('stock-changed', handleEventUpdate);
+    window.addEventListener('inventory-updated', handleEventUpdate);
+    window.addEventListener('sales-updated', handleEventUpdate);
+
+    // Auto-poll every 60 seconds as guaranteed real-time fallback
+    const pollingInterval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 60000);
+
+    return () => {
+      window.removeEventListener('stock-changed', handleEventUpdate);
+      window.removeEventListener('inventory-updated', handleEventUpdate);
+      window.removeEventListener('sales-updated', handleEventUpdate);
+      clearInterval(pollingInterval);
+    };
   }, []);
 
   const totalCategoryProducts = useMemo(() =>
@@ -528,7 +566,13 @@ const Dashboard = () => {
               <BuildingStorefrontIcon className="w-5 h-5 text-indigo-600" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Store Summary</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Store Summary</p>
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-emerald-600">LIVE</span>
+                </span>
+              </div>
               <p className="text-sm font-bold text-slate-800 mt-0.5">
                 {user?.store_name || 'Your Kirana Store'} — {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
               </p>
@@ -536,12 +580,12 @@ const Dashboard = () => {
           </div>
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label: 'Revenue', value: `₹${Number(kpis.totalSales || 0).toLocaleString('en-IN')}` },
-              { label: 'Orders', value: (kpis.totalOrders || 0).toLocaleString('en-IN') },
-              { label: 'Profit', value: `₹${Number(kpis.profit || 0).toLocaleString('en-IN')}` },
+              { label: "Today's Revenue", value: `₹${Number(todayKpis.totalSales || 0).toLocaleString('en-IN')}`, color: 'text-emerald-700' },
+              { label: "Today's Orders", value: (todayKpis.totalOrders || 0).toLocaleString('en-IN'), color: 'text-indigo-700' },
+              { label: "Today's Profit", value: `₹${Number(todayKpis.profit || 0).toLocaleString('en-IN')}`, color: 'text-violet-700' },
             ].map(item => (
               <div key={item.label} className="text-center px-4 border-r border-slate-100 last:border-0">
-                <p className="text-base font-bold text-slate-900">{item.value}</p>
+                <p className={`text-base font-bold ${item.color}`}>{item.value}</p>
                 <p className="text-[11px] font-medium text-slate-400 mt-0.5">{item.label}</p>
               </div>
             ))}

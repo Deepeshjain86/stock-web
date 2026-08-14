@@ -735,14 +735,14 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
     }
 
     if (brand) {
-      salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub JOIN products pr_sub ON si_sub.product_id = pr_sub.id WHERE si_sub.sale_id = s.id AND pr_sub.brand = ?)';
-      salesParams.push(brand);
+      salesWhere += ' AND EXISTS (SELECT 1 FROM sale_items si_sub JOIN products pr_sub ON si_sub.product_id = pr_sub.id WHERE si_sub.sale_id = s.id AND (pr_sub.brand = ? OR pr_sub.brand_id = ?))';
+      salesParams.push(brand, brand);
 
-      purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub JOIN products pr_sub ON pi_sub.product_id = pr_sub.id WHERE pi_sub.purchase_id = p.id AND pr_sub.brand = ?)';
-      purchParams.push(brand);
+      purchWhere += ' AND EXISTS (SELECT 1 FROM purchase_items pi_sub JOIN products pr_sub ON pi_sub.product_id = pr_sub.id WHERE pi_sub.purchase_id = p.id AND (pr_sub.brand = ? OR pr_sub.brand_id = ?))';
+      purchParams.push(brand, brand);
 
-      logsWhere += ' AND EXISTS (SELECT 1 FROM products pr_sub WHERE pr_sub.id = sl.product_id AND pr_sub.brand = ?)';
-      logsParams.push(brand);
+      logsWhere += ' AND EXISTS (SELECT 1 FROM products pr_sub WHERE pr_sub.id = sl.product_id AND (pr_sub.brand = ? OR pr_sub.brand_id = ?))';
+      logsParams.push(brand, brand);
     }
 
     if (vendorId) {
@@ -830,6 +830,20 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       `, salesParams);
       const totalUnitsSold = Number(unitsSoldTotalRes[0]?.total_units_sold || 0);
 
+      // Build transfer WHERE that respects date filter
+      let transferWhere = "WHERE status IN ('Completed', 'In Transit')";
+      const transferParams = [];
+      if (startDate) { transferWhere += ' AND DATE(created_at) >= ?'; transferParams.push(startDate); }
+      if (endDate)   { transferWhere += ' AND DATE(created_at) <= ?'; transferParams.push(endDate); }
+
+      const [transferValRes] = await db.query(`
+        SELECT COALESCE(SUM(total_value), 0) as total_transfer_value, COALESCE(SUM(quantity), 0) as total_transfer_qty
+        FROM stock_transfers
+        ${transferWhere}
+      `, transferParams);
+      const totalStockTransferredValue = Number(transferValRes[0]?.total_transfer_value || 0);
+      const totalStockTransferredQty = Number(transferValRes[0]?.total_transfer_qty || 0);
+
       kpis = {
         totalSales: salesCalc.netSales,
         unitsSold: totalUnitsSold,
@@ -842,6 +856,8 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
         purchaseGst: purchCalc.totalGst > 0 ? purchCalc.totalGst : purchCalc.stockGst,
         stockGst: purchCalc.stockGst,
         vendorReturns: purchCalc.vendorReturns,
+        totalStockTransferredValue,
+        totalStockTransferredQty,
         stockDestroyCost: destroyCalc.destroyCost,
         stockDestroyQty: destroyCalc.destroyQty,
         borrowOutstanding: borrowCalc.borrowOutstanding,
@@ -910,13 +926,20 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
       returnLabelExpr = "DATE_FORMAT(pr.created_at, '%Y')";
     }
 
+    // Build a purchase_returns WHERE clause that respects date + vendor filters
+    let returnsWhere = 'WHERE pr.status != \'Cancelled\'';
+    const returnsParams = [];
+    if (startDate) { returnsWhere += ' AND DATE(pr.created_at) >= ?'; returnsParams.push(startDate); }
+    if (endDate)   { returnsWhere += ' AND DATE(pr.created_at) <= ?'; returnsParams.push(endDate); }
+    if (vendorId)  { returnsWhere += ' AND pr.vendor_id = ?';         returnsParams.push(Number(vendorId)); }
+
     const [returnsTrend] = await db.query(`
       SELECT ${returnLabelExpr} as label,
              COALESCE(SUM(pr.total_amount), 0) as returns_val
       FROM purchase_returns pr
-      WHERE pr.status != 'Cancelled'
+      ${returnsWhere}
       GROUP BY label
-    `);
+    `, returnsParams);
 
     const trendMap = {};
     salesTrend.forEach(row => {

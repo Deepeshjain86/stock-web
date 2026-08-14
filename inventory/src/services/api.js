@@ -248,6 +248,38 @@ export const stockAPI = {
     const response = await API.post('/stock/transfer', data);
     return response.data;
   },
+  createTransfer: async (data) => {
+    const response = await API.post('/stock/transfer/create', data);
+    return response.data;
+  },
+  getWarehouses: async () => {
+    const response = await API.get('/stock/warehouses');
+    return response.data;
+  },
+  createWarehouse: async (data) => {
+    const response = await API.post('/stock/warehouses', data);
+    return response.data;
+  },
+  getTransfers: async (params) => {
+    const response = await API.get('/stock/transfers', { params });
+    return response.data;
+  },
+  getTransferKPIs: async () => {
+    const response = await API.get('/stock/transfers/kpis');
+    return response.data;
+  },
+  shipTransfer: async (id) => {
+    const response = await API.post(`/stock/transfer/${id}/ship`);
+    return response.data;
+  },
+  receiveTransfer: async (id, data) => {
+    const response = await API.post(`/stock/transfer/${id}/receive`, data);
+    return response.data;
+  },
+  cancelTransfer: async (id, data) => {
+    const response = await API.post(`/stock/transfer/${id}/cancel`, data);
+    return response.data;
+  },
 };
 
 // Stock Destroy Services

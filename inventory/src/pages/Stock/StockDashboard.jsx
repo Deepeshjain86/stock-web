@@ -22,6 +22,7 @@ import StockIn from './StockIn';
 import StockOut from './StockOut';
 import VendorReturnManagement from './VendorReturnManagement';
 import StockDestroy from './StockDestroy';
+import StockTransfer from './StockTransfer';
 import PurchaseList from '../Purchase/PurchaseList';
 import PurchaseOrderList from '../Purchase/PurchaseOrderList';
 
@@ -393,35 +394,7 @@ const StockDashboard = () => {
         
         {activeTab === 'stock-destroy' && <StockDestroy onStockChanged={handleStockChanged} />}
         
-        {activeTab === 'stock-transfer' && (
-          <div className="space-y-4">
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => navigate('/dashboard/stock/in')}
-                className={`px-4 py-2 text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer border ${
-                  !isOutwardTransfer 
-                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-soft' 
-                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50/80'
-                }`}
-              >
-                📥 Inward Stock Transfer
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/dashboard/stock/out')}
-                className={`px-4 py-2 text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer border ${
-                  isOutwardTransfer 
-                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-soft' 
-                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50/80'
-                }`}
-              >
-                📤 Outward Stock Transfer
-              </button>
-            </div>
-            {!isOutwardTransfer ? <StockIn onStockChanged={handleStockChanged} /> : <StockOut onStockChanged={handleStockChanged} />}
-          </div>
-        )}
+        {activeTab === 'stock-transfer' && <StockTransfer onStockChanged={handleStockChanged} />}
         
         {activeTab === 'stock-history' && <StockHistory />}
       </div>
