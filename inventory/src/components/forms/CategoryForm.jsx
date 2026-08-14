@@ -85,7 +85,7 @@ const CategoryForm = ({ category, onSubmit, onCancel }) => {
           name="sub_category"
           value={formData.sub_category}
           onChange={handleChange}
-          placeholder="e.g. Soft Drinks"
+          placeholder="Sub Categorys"
           className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 bg-slate-50/50 font-semibold outline-none text-slate-800"
         />
       </div>

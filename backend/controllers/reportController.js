@@ -1081,11 +1081,13 @@ export const getAdvancedAnalyticsData = async (req, res, next) => {
 export const getInventorySummary = async (req, res, next) => {
   try {
     const isSuperAdmin = req.user.role === 'Super Admin';
+    const userRole = req.user.role;
+    const isStoreStaff = ['Admin', 'Sales Manager', 'Sales Employee', 'Purchase Manager', 'Purchase Employee', 'Manager', 'Employee', 'Staff'].includes(userRole);
 
-    const hasViewProducts = isSuperAdmin || req.user.role === 'Admin' || req.user.permissions?.includes('view_products');
-    const hasViewStock = isSuperAdmin || req.user.role === 'Admin' || req.user.permissions?.includes('view_stock');
-    const hasViewCategories = isSuperAdmin || req.user.role === 'Admin' || req.user.permissions?.includes('view_categories');
-    const hasManageVendors = isSuperAdmin || req.user.role === 'Admin' || req.user.permissions?.includes('manage_vendors');
+    const hasViewProducts = isSuperAdmin || isStoreStaff || req.user.permissions?.includes('view_products');
+    const hasViewStock = isSuperAdmin || isStoreStaff || req.user.permissions?.includes('view_stock');
+    const hasViewCategories = isSuperAdmin || isStoreStaff || req.user.permissions?.includes('view_categories');
+    const hasManageVendors = isSuperAdmin || isStoreStaff || req.user.permissions?.includes('manage_vendors') || req.user.permissions?.includes('view_vendors');
 
     let totalProducts = 0;
     let totalCategories = 0;

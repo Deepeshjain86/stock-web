@@ -696,7 +696,7 @@ const StaffList = () => {
                   inputMode="numeric"
                   value={formData.contact}
                   onChange={(e) => handleFieldChange('contact', e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  placeholder="10-digit Contact No."
+                  placeholder="Contact No."
                   maxLength={10}
                   className={`w-full pl-9 pr-3 py-2 text-xs border rounded-xl focus:outline-none font-bold transition-all ${
                     errors.contact 

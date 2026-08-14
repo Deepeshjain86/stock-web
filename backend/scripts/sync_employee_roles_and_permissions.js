@@ -59,7 +59,30 @@ export async function syncEmployeeRoles() {
           }
         }
 
-        // 3. Check & Insert "Sales Employee"
+        // 3. Check & Insert "Sales Manager"
+        let [smRole] = await tenantConn.query('SELECT id FROM roles WHERE name = "Sales Manager"');
+        let smRoleId;
+        if (smRole.length === 0) {
+          console.log(`  -> Creating "Sales Manager" role...`);
+          const [ins] = await tenantConn.query(
+            'INSERT INTO roles (name, description) VALUES ("Sales Manager", "Sales department head with sales metrics and staff control")'
+          );
+          smRoleId = ins.insertId;
+        } else {
+          smRoleId = smRole[0].id;
+        }
+
+        const smPerms = ['view_dashboard', 'view_sales', 'create_sales', 'delete_sales', 'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users', 'view_vendors', 'view_products', 'view_categories', 'view_stock'];
+        for (const permName of smPerms) {
+          if (permMap[permName]) {
+            await tenantConn.query(
+              'INSERT IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)',
+              [smRoleId, permMap[permName]]
+            );
+          }
+        }
+
+        // 4. Check & Insert "Sales Employee"
         let [seRole] = await tenantConn.query('SELECT id FROM roles WHERE name = "Sales Employee"');
         let seRoleId;
         if (seRole.length === 0) {
@@ -72,7 +95,7 @@ export async function syncEmployeeRoles() {
           seRoleId = seRole[0].id;
         }
 
-        const sePerms = ['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow'];
+        const sePerms = ['view_dashboard', 'view_sales', 'create_sales', 'manage_customers', 'view_borrow', 'create_borrow', 'view_products', 'view_categories', 'view_stock', 'view_vendors'];
         for (const permName of sePerms) {
           if (permMap[permName]) {
             await tenantConn.query(

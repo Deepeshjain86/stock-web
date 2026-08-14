@@ -473,7 +473,7 @@ const Settings = () => {
                     value={storeSettings.store_phone}
                     onChange={handleStoreChange}
                     maxLength={10}
-                    placeholder="e.g. 9876543210"
+                    placeholder="Contact No."
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:outline-none focus:border-indigo-500 font-semibold text-slate-700 font-mono"
                   />
                 </div>
@@ -749,7 +749,7 @@ const Settings = () => {
               required
               value={userForm.name}
               onChange={(e) => setUserForm(prev => ({ ...prev, name: e.target.value }))}
-              placeholder="e.g. सुरेश पटेल"
+              placeholder="Name"
               className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:outline-none focus:border-indigo-500 font-semibold"
             />
           </div>

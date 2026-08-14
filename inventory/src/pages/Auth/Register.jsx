@@ -281,7 +281,7 @@ const Register = () => {
                     value={form.phone}
                     onChange={handleChange}
                     autoComplete="off"
-                    placeholder="Contact No. (10 digits)"
+                    placeholder="Contact No."
                     maxLength={10}
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:font-medium focus:outline-none focus:border-indigo-500 transition-colors"
                   />
@@ -301,7 +301,7 @@ const Register = () => {
                     value={form.address}
                     onChange={handleChange}
                     autoComplete="off"
-                    placeholder="Enter store area or city"
+                    placeholder="Address"
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:font-medium focus:outline-none focus:border-indigo-500 transition-colors"
                   />
                 </div>

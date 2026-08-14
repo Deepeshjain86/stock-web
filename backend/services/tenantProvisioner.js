@@ -161,7 +161,8 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     // Sales Manager gets full access only to the Sales module, Sales Dashboard, Borrow, and Customer management
     const salesManagerPerms = [
       'view_dashboard', 'view_sales', 'create_sales', 'delete_sales', 
-      'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users', 'view_vendors'
+      'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users', 'view_vendors',
+      'view_products', 'view_categories', 'view_stock'
     ];
     for (const name of salesManagerPerms) {
       if (permMap[name]) {

@@ -121,7 +121,7 @@ const Login = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="username email"
-                placeholder="Enter email or Admin ID (e.g. MOHAN001)"
+                placeholder="Enter email or Admin ID"
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none rounded-xl text-xs font-bold text-slate-800 dark:text-white placeholder:text-slate-400 placeholder:font-medium transition-all"
               />
             </div>

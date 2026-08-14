@@ -235,7 +235,8 @@ const runMigration = async () => {
       // Map Sales Manager permissions
       const salesManagerPerms = [
         'view_dashboard', 'view_sales', 'create_sales', 'delete_sales', 
-        'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users'
+        'manage_customers', 'view_reports', 'view_borrow', 'create_borrow', 'manage_users',
+        'view_products', 'view_categories', 'view_stock', 'view_vendors'
       ];
       for (const permName of salesManagerPerms) {
         const pId = permMap[permName];
