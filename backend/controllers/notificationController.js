@@ -212,13 +212,13 @@ export const getNotifications = async (req, res, next) => {
     const [countResult] = await db.query(countQuery, fullParams);
     const total = countResult[0]?.count || 0;
 
-    // Ordering & Pagination
+    // Ordering & Pagination (Unread/Unseen first, then newest first)
     const selectQuery = `
       SELECT n.*, 
              COALESCE(nus.is_read, n.is_read) as is_read,
              COALESCE(nus.is_deleted, FALSE) as is_deleted
       ${joinClause} ${whereClause}
-      ORDER BY n.created_at DESC LIMIT ? OFFSET ?
+      ORDER BY COALESCE(nus.is_read, n.is_read) ASC, n.created_at DESC LIMIT ? OFFSET ?
     `;
     const parsedLimit = parseInt(limit) || 50;
     const parsedPage = parseInt(page) || 1;

@@ -285,9 +285,9 @@ const Header = ({ onOpenShortcuts }) => {
   const { notifications = [], unreadCount = 0 } = useAppSelector((state) => state.notifications);
 
   useEffect(() => {
-    dispatch(fetchNotificationsThunk({ limit: 5 }));
+    dispatch(fetchNotificationsThunk({ limit: 50 }));
     const interval = setInterval(() => {
-      dispatch(fetchNotificationsThunk({ limit: 5 }));
+      dispatch(fetchNotificationsThunk({ limit: 50 }));
     }, 15000);
     return () => clearInterval(interval);
   }, [dispatch]);
@@ -465,7 +465,14 @@ const Header = ({ onOpenShortcuts }) => {
               {/* Notifications */}
               <div className="relative" ref={notificationsRef}>
                 <button
-                  onClick={() => { setShowNotifications(!showNotifications); setShowProfileMenu(false); }}
+                  onClick={() => {
+                    const nextShow = !showNotifications;
+                    setShowNotifications(nextShow);
+                    setShowProfileMenu(false);
+                    if (nextShow) {
+                      dispatch(fetchNotificationsThunk({ limit: 50 }));
+                    }
+                  }}
                   className={`relative p-2.5 rounded-xl transition-all border ${showNotifications ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-200/60 text-slate-600 hover:bg-slate-100'}`}
                 >
                   <BellIcon className="w-5 h-5" />
