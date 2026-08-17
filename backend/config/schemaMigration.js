@@ -413,7 +413,7 @@ export const runCategorySchemaMigrations = async (pool) => {
       console.warn('[Schema Migration] Batch data repair check:', e.message);
     }
 
-    // ── ENSURE STOCK_DESTROYS TABLE EXISTS ──
+    // ── ENSURE STOCK_DESTROYS TABLE EXISTS & HAS REQUIRED COLUMNS ──
     try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS stock_destroys (
@@ -450,6 +450,24 @@ export const runCategorySchemaMigrations = async (pool) => {
           INDEX idx_product_id (product_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+
+      const [sdCols] = await pool.query('DESCRIBE stock_destroys');
+      const sdColNames = sdCols.map(c => c.Field);
+      const requiredSdCols = [
+        { name: 'batch_id', type: 'INT NULL AFTER batch_no' },
+        { name: 'source_location', type: "VARCHAR(150) DEFAULT 'Main Storage' AFTER warehouse_name" },
+        { name: 'scrap_location', type: "VARCHAR(150) DEFAULT 'Scrap / Inventory Loss Location' AFTER source_location" },
+        { name: 'unit_cost', type: "DECIMAL(12,2) DEFAULT 0.00 AFTER unit" }
+      ];
+      for (const col of requiredSdCols) {
+        if (!sdColNames.includes(col.name)) {
+          await pool.query(`ALTER TABLE stock_destroys ADD COLUMN ${col.name} ${col.type}`);
+        }
+      }
+      const statusCol = sdCols.find(c => c.Field === 'status');
+      if (statusCol && !statusCol.Type.includes("'Draft'")) {
+        await pool.query(`ALTER TABLE stock_destroys MODIFY COLUMN status ENUM('Draft', 'Confirmed', 'Cancelled') DEFAULT 'Confirmed'`);
+      }
     } catch (e) {
       console.warn('[Schema Migration] stock_destroys table check:', e.message);
     }

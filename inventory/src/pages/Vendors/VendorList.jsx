@@ -29,7 +29,7 @@ import Modal from '../../components/common/Modal';
 import VendorForm from '../../components/forms/VendorForm';
 
 import StatsCard from '../../components/common/StatsCard';
-import { vendorsAPI, purchasesAPI, purchaseOrdersAPI, vendorReturnsAPI } from '../../services/api';
+import { vendorsAPI, purchasesAPI, purchaseOrdersAPI, vendorReturnsAPI, stockAPI, productsAPI } from '../../services/api';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { showToast } from '../../store/slices/notificationSlice';
 
