@@ -1,5 +1,102 @@
 export const runCategorySchemaMigrations = async (pool) => {
   try {
+    // 0a. Ensure warehouses table exists & seed default Main Storage
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS warehouses (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          location VARCHAR(255) DEFAULT 'Main Building',
+          status ENUM('Active', 'Inactive') DEFAULT 'Active',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      const [whCount] = await pool.query('SELECT COUNT(*) as cnt FROM warehouses');
+      if (whCount[0]?.cnt === 0) {
+        await pool.query(`
+          INSERT IGNORE INTO warehouses (id, name, location, status) VALUES
+          (1, 'Main Storage', 'Ground Floor Stockroom', 'Active')
+        `);
+      }
+    } catch (e) {
+      console.warn('[Schema Migration] Warehouses table check:', e.message);
+    }
+
+    // 0b. Ensure stock_transfers table exists & patch required columns
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS stock_transfers (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          transfer_no VARCHAR(50) NOT NULL UNIQUE,
+          from_warehouse_id INT NOT NULL,
+          to_warehouse_id INT NOT NULL,
+          from_warehouse_name VARCHAR(255) DEFAULT 'Main Storage',
+          to_warehouse_name VARCHAR(255) DEFAULT 'Secondary Warehouse',
+          product_id INT NOT NULL,
+          product_name VARCHAR(255) NOT NULL,
+          barcode VARCHAR(100) DEFAULT 'N/A',
+          sku VARCHAR(100) DEFAULT 'N/A',
+          batch_id INT NULL,
+          batch_no VARCHAR(100) DEFAULT 'DEFAULT',
+          expiry_date DATE NULL,
+          quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+          in_transit_quantity DECIMAL(12,3) DEFAULT 0.000,
+          unit VARCHAR(50) DEFAULT 'Pcs',
+          unit_cost DECIMAL(12,2) DEFAULT 0.00,
+          total_value DECIMAL(12,2) DEFAULT 0.00,
+          status ENUM('Draft', 'In Transit', 'Pending', 'In-Transit', 'Completed', 'Cancelled') DEFAULT 'In Transit',
+          remarks TEXT NULL,
+          cancel_reason TEXT NULL,
+          created_by INT NULL,
+          created_by_name VARCHAR(255) DEFAULT 'Admin',
+          received_by INT NULL,
+          received_by_name VARCHAR(255) NULL,
+          shipped_at DATETIME NULL,
+          received_at DATETIME NULL,
+          transfer_date DATE NULL DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+
+      const [stCols] = await pool.query('DESCRIBE stock_transfers');
+      const stColNames = stCols.map(c => c.Field);
+      const requiredStCols = [
+        { name: 'product_id', type: 'INT NOT NULL DEFAULT 0' },
+        { name: 'product_name', type: 'VARCHAR(255) NOT NULL DEFAULT ""' },
+        { name: 'barcode', type: 'VARCHAR(100) DEFAULT "N/A"' },
+        { name: 'sku', type: 'VARCHAR(100) DEFAULT "N/A"' },
+        { name: 'from_warehouse_name', type: 'VARCHAR(255) DEFAULT "Main Storage"' },
+        { name: 'to_warehouse_name', type: 'VARCHAR(255) DEFAULT "Secondary Warehouse"' },
+        { name: 'batch_id', type: 'INT NULL' },
+        { name: 'batch_no', type: 'VARCHAR(100) DEFAULT "DEFAULT"' },
+        { name: 'expiry_date', type: 'DATE NULL' },
+        { name: 'quantity', type: 'DECIMAL(12,3) NOT NULL DEFAULT 0.000' },
+        { name: 'in_transit_quantity', type: 'DECIMAL(12,3) DEFAULT 0.000' },
+        { name: 'unit', type: 'VARCHAR(50) DEFAULT "Pcs"' },
+        { name: 'unit_cost', type: 'DECIMAL(12,2) DEFAULT 0.00' },
+        { name: 'total_value', type: 'DECIMAL(12,2) DEFAULT 0.00' },
+        { name: 'remarks', type: 'TEXT NULL' },
+        { name: 'cancel_reason', type: 'TEXT NULL' },
+        { name: 'created_by', type: 'INT NULL' },
+        { name: 'created_by_name', type: 'VARCHAR(255) DEFAULT "Admin"' },
+        { name: 'received_by', type: 'INT NULL' },
+        { name: 'received_by_name', type: 'VARCHAR(255) NULL' },
+        { name: 'shipped_at', type: 'DATETIME NULL' },
+        { name: 'received_at', type: 'DATETIME NULL' },
+        { name: 'transfer_date', type: 'DATE NULL DEFAULT NULL' }
+      ];
+      for (const col of requiredStCols) {
+        if (!stColNames.includes(col.name)) {
+          await pool.query(`ALTER TABLE stock_transfers ADD COLUMN ${col.name} ${col.type}`);
+        }
+      }
+      await pool.query(`ALTER TABLE stock_transfers MODIFY COLUMN status ENUM('Draft', 'In Transit', 'Pending', 'In-Transit', 'Completed', 'Cancelled') DEFAULT 'In Transit'`);
+    } catch (e) {
+      console.warn('[Schema Migration] stock_transfers table check:', e.message);
+    }
+
     // 1. Ensure sub_categories table exists
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sub_categories (
@@ -315,7 +412,148 @@ export const runCategorySchemaMigrations = async (pool) => {
     } catch (e) {
       console.warn('[Schema Migration] Batch data repair check:', e.message);
     }
+
+    // ── ENSURE STOCK_DESTROYS TABLE EXISTS ──
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS stock_destroys (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          destroy_no VARCHAR(50) NOT NULL UNIQUE,
+          product_id INT NOT NULL,
+          product_name VARCHAR(255) NOT NULL,
+          barcode VARCHAR(100) NULL,
+          sku VARCHAR(100) NULL,
+          batch_no VARCHAR(100) NULL,
+          batch_id INT NULL,
+          warehouse_name VARCHAR(100) DEFAULT 'Main Storage',
+          source_location VARCHAR(150) DEFAULT 'Main Storage',
+          scrap_location VARCHAR(150) DEFAULT 'Scrap / Inventory Loss Location',
+          available_stock DECIMAL(12,3) DEFAULT 0.000,
+          destroy_quantity DECIMAL(12,3) NOT NULL,
+          unit VARCHAR(50) DEFAULT 'Pcs',
+          unit_cost DECIMAL(12,2) DEFAULT 0.00,
+          purchase_price DECIMAL(12,2) DEFAULT 0.00,
+          selling_price DECIMAL(12,2) DEFAULT 0.00,
+          destroy_value DECIMAL(12,2) NOT NULL,
+          reason VARCHAR(100) NOT NULL,
+          remarks TEXT NULL,
+          evidence_image LONGTEXT NULL,
+          destroyed_by_id INT NULL,
+          destroyed_by_name VARCHAR(255) NULL,
+          status ENUM('Draft', 'Confirmed', 'Cancelled') DEFAULT 'Confirmed',
+          cancel_reason TEXT NULL,
+          cancelled_by_name VARCHAR(255) NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+          INDEX idx_destroy_no (destroy_no),
+          INDEX idx_product_id (product_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+    } catch (e) {
+      console.warn('[Schema Migration] stock_destroys table check:', e.message);
+    }
+
+    // ── ENSURE STOCK_ADJUSTMENTS TABLE EXISTS ──
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS stock_adjustments (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          adjustment_no VARCHAR(50) NOT NULL UNIQUE,
+          product_id INT NOT NULL,
+          warehouse_id INT NOT NULL DEFAULT 1,
+          batch_id INT NULL,
+          batch_number VARCHAR(100) NULL,
+          adjustment_type ENUM('Increase', 'Decrease') NOT NULL,
+          quantity DECIMAL(12,3) NOT NULL,
+          unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+          adjustment_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+          reason VARCHAR(100) NOT NULL,
+          financial_impact ENUM('Gain', 'Loss', 'None') NOT NULL DEFAULT 'None',
+          remarks TEXT NULL,
+          previous_quantity DECIMAL(12,3) DEFAULT 0.00,
+          new_quantity DECIMAL(12,3) DEFAULT 0.00,
+          previous_inventory_value DECIMAL(12,2) DEFAULT 0.00,
+          new_inventory_value DECIMAL(12,2) DEFAULT 0.00,
+          accounting_treatment VARCHAR(100) DEFAULT 'Inventory Variation',
+          user_id INT NULL,
+          status ENUM('Completed', 'Reversed') NOT NULL DEFAULT 'Completed',
+          reversal_ref_id INT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+          FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+          INDEX idx_adj_no (adjustment_no),
+          INDEX idx_adj_product (product_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+    } catch (e) {
+      console.warn('[Schema Migration] stock_adjustments table check:', e.message);
+    }
+
+    // ── ENSURE INVENTORY_VALUATION_LAYERS TABLE EXISTS ──
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS inventory_valuation_layers (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          product_id INT NOT NULL,
+          warehouse_id INT NOT NULL DEFAULT 1,
+          batch_id INT NULL,
+          transaction_type ENUM(
+            'Purchase Receipt', 'Sales Delivery', 'Sales Return', 'Purchase Return',
+            'Stock Adjustment', 'Scrap/Wastage', 'Stock Transfer', 'Transfer Out',
+            'Transfer In', 'Transfer Reversal', 'Revaluation'
+          ) NOT NULL,
+          reference_no VARCHAR(100) NOT NULL,
+          quantity_delta DECIMAL(12,3) NOT NULL,
+          unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+          value_delta DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+          previous_inventory_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+          new_inventory_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+          previous_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.00,
+          new_quantity DECIMAL(12,3) NOT NULL DEFAULT 0.00,
+          accounting_treatment VARCHAR(100) NULL DEFAULT 'Inventory Variation',
+          created_by INT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+          FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+          INDEX idx_ivl_product (product_id),
+          INDEX idx_ivl_type (transaction_type),
+          INDEX idx_ivl_ref (reference_no)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+    } catch (e) {
+      console.warn('[Schema Migration] inventory_valuation_layers table check:', e.message);
+    }
+
+    // ── ENSURE INVENTORY_REVALUATIONS TABLE EXISTS ──
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS inventory_revaluations (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          revaluation_no VARCHAR(50) NOT NULL UNIQUE,
+          product_id INT NOT NULL,
+          warehouse_id INT NOT NULL DEFAULT 1,
+          batch_id INT NULL,
+          old_unit_cost DECIMAL(12,2) NOT NULL,
+          new_unit_cost DECIMAL(12,2) NOT NULL,
+          quantity DECIMAL(12,3) NOT NULL,
+          value_delta DECIMAL(12,2) NOT NULL,
+          reason VARCHAR(100) NOT NULL,
+          remarks TEXT NULL,
+          user_id INT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+          FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+          INDEX idx_rev_no (revaluation_no),
+          INDEX idx_rev_product (product_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+    } catch (e) {
+      console.warn('[Schema Migration] inventory_revaluations table check:', e.message);
+    }
   } catch (err) {
     console.error('[Schema Migration] Category schema migration notice:', err.message);
   }
 };
+
