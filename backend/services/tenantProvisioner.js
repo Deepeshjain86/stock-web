@@ -208,7 +208,7 @@ export const provisionTenantDatabase = async (tenantId, dbName, storeName, owner
     }
 
     // 7. Seed Default Warehouse
-    await tenantConn.query('INSERT INTO warehouses (name, location, status) VALUES ("Main Storage", "Ground Floor Stockroom", "Active")');
+    await tenantConn.query('INSERT IGNORE INTO warehouses (name, location, status) VALUES ("Main Storage", "Ground Floor Stockroom", "Active")');
 
     // 9. Seed POS Walk-in Customer
     await tenantConn.query('INSERT INTO customers (name, phone, email, address) VALUES ("Walk-in Customer", "0000000000", ?, "Counter Billing")', [`walkin@${tenantId}.com`]);

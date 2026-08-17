@@ -719,4 +719,45 @@ CREATE TABLE IF NOT EXISTS inventory_revaluations (
   INDEX idx_rev_product (product_id)
 );
 
+-- 28. Stock Transfers Table
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  transfer_no VARCHAR(50) NOT NULL UNIQUE,
+  from_warehouse_id INT NOT NULL,
+  to_warehouse_id INT NOT NULL,
+  from_warehouse_name VARCHAR(255) DEFAULT 'Main Storage',
+  to_warehouse_name VARCHAR(255) DEFAULT 'Secondary Warehouse',
+  product_id INT NOT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  barcode VARCHAR(100) DEFAULT 'N/A',
+  sku VARCHAR(100) DEFAULT 'N/A',
+  batch_id INT NULL,
+  batch_no VARCHAR(100) DEFAULT 'DEFAULT',
+  expiry_date DATE NULL,
+  quantity DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+  in_transit_quantity DECIMAL(12,3) DEFAULT 0.000,
+  unit VARCHAR(50) DEFAULT 'Pcs',
+  unit_cost DECIMAL(12,2) DEFAULT 0.00,
+  total_value DECIMAL(12,2) DEFAULT 0.00,
+  status ENUM('Draft', 'In Transit', 'Pending', 'In-Transit', 'Completed', 'Cancelled') DEFAULT 'In Transit',
+  remarks TEXT NULL,
+  cancel_reason TEXT NULL,
+  created_by INT NULL,
+  created_by_name VARCHAR(255) DEFAULT 'Admin',
+  received_by INT NULL,
+  received_by_name VARCHAR(255) NULL,
+  shipped_at DATETIME NULL,
+  received_at DATETIME NULL,
+  transfer_date DATE NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (from_warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  FOREIGN KEY (to_warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  INDEX idx_transfer_no (transfer_no),
+  INDEX idx_transfer_product (product_id),
+  INDEX idx_transfer_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 
